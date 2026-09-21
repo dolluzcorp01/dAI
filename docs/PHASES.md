@@ -28,6 +28,9 @@ by a real person. PENDING = not started. Update this table at the end of every s
 1.2 Service auth for the dAdmin console
     - Middleware accepting a 60-second JWT signed with DADMIN_SHARED_JWT_SECRET,
       payload { emp_id, aud: "dai-admin" }. Maps emp_id to the Kody user and their roles.
+    - DADMIN_SHARED_JWT_SECRET is a dedicated random secret, shared only with dAdmin's
+      DAI_SHARED_JWT_SECRET. It is NOT dAdmin's JWT_SECRET, so a dAdmin user session token
+      can never be replayed against dAI, and either side can rotate it without logging anyone out.
     - Accepted only on /api/admin, /api/knowledge, /api/kody/sme, /api/users/admin and
       POST /api/notifications/announce. Every other route keeps user tokens only.
     Done-check: a signed call from curl works; expired, wrong audience or wrong secret get 401.
