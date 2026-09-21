@@ -119,6 +119,18 @@ describe("tier 0, codes are looked up and never generated", () => {
     assert.equal(r.body.message.lookupCode, "M54.50");
   });
 
+  test("a tier 0 answer dates its code set edition as YYYY-MM-DD, and keeps it on reload", async () => {
+    // dAI: mysql2 returns a DATE as a Date object, and String(date) begins "Thu Jan 01".
+    // CO-45 is seeded effective 2026-01-01 by migration 005.
+    const r = await api("POST", "/api/kody/ask", { question: "CO-45" }, shoban.token);
+    assert.equal(r.body.message.tier, 0);
+    assert.equal(r.body.message.sourceAsOf, "2026-01-01");
+
+    const thread = await api("GET", `/api/kody/threads/${r.body.threadId}`, null, shoban.token);
+    const answer = thread.body.messages.find(m => m.role === "assistant");
+    assert.equal(answer.sourceAsOf, "2026-01-01", "stored the same way it was shown");
+  });
+
   test("the direct lookup endpoint works for the recent-codes strip", async () => {
     const r = await api("GET", "/api/kody/codes/D0140", null, shoban.token);
     assert.equal(r.status, 404, "D0140 is CDT, which is licensed and not seeded");

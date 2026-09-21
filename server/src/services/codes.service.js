@@ -121,7 +121,11 @@ function answerFromCode(entry) {
     text,
     confidence: "high",
     sourceName: `${entry.codeSet} code set`,
-    sourceAsOf: entry.effectiveFrom ? String(entry.effectiveFrom).slice(0, 10) : null,
+    // dAI: mysql2 returns a DATE as a Date object, and String(date) begins "Thu Jan 01",
+    // so format it explicitly. A string (another driver, a fixture) still passes through.
+    sourceAsOf: entry.effectiveFrom instanceof Date
+      ? entry.effectiveFrom.toISOString().slice(0, 10)
+      : (entry.effectiveFrom ? String(entry.effectiveFrom).slice(0, 10) : null),
     disclaimer: null,
     links: [],
     citedDocIds: [],

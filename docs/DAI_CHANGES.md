@@ -28,6 +28,7 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | server/src/routes/chat.routes.js | One line: call the fan-out after a REST send. |
 | server/src/lib/tokens.js | Accept https://<id>.chromiumapp.org/ callbacks only for ids in EXTENSION_IDS (docs/14). |
 | server/src/services/kody.service.js | Store and read lookup_description (migration 007 added the column; the service never used it). |
+| server/src/services/codes.service.js | answerFromCode formatted effective_from with String(), and mysql2 returns a Date, so every tier 0 answer read "Thu Jan 01" instead of "2026-01-01". Now formats a Date as YYYY-MM-DD. Test in kody.test.js. Found in the Step 1 live run. |
 | server/src/services/conversations.service.js | get() now names a DM after the other member, as listMine() already did. |
 | server/tests/users.test.js | Restores the member's seeded settings and skills first, so the suite passes on a second run (module rule 16). |
 | .env.example | Rewritten: the old one used key names config.js never read (DO_SPACES_*, PGVECTOR_URL). |
