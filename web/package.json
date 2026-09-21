@@ -1,0 +1,10 @@
+{
+  "name": "dai-kody-web-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Kody client SDK (api, adapters, realtime socket, login screen). Copied into the dAI React app in Phase 1.",
+  "dependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}

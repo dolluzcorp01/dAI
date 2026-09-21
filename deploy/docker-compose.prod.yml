@@ -1,0 +1,72 @@
+# Production stack for a single DigitalOcean droplet.
+#
+# Two API replicas on purpose: it is the smallest configuration that proves
+# the Redis adapter is working. If messages only reach half your users, that
+# is this file's fault, not the application's.
+
+name: kody
+
+services:
+  api:
+    image: ghcr.io/dolluzcorp/kody-api:${KODY_VERSION:-latest}
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+    env_file: [.env.production]
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      APP_VERSION: ${KODY_VERSION:-dev}
+    depends_on:
+      redis: { condition: service_healthy }
+      clamav: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4000/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # No persistence. Redis here is a message bus, not a store: everything in
+    # it is reconstructible, and losing it costs one reconnect.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  clamav:
+    image: clamav/clamav:stable
+    restart: unless-stopped
+    volumes:
+      - clamav-db:/var/lib/clamav
+    healthcheck:
+      # The first signature download takes several minutes. start_period
+      # covers it, otherwise the stack looks broken on a fresh host.
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [api]
+
+volumes:
+  clamav-db:
+  caddy-data:
+  caddy-config:

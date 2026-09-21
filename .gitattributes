@@ -1,0 +1,6 @@
+# Keep LF everywhere. Migrations are checksummed in schema_migrations, so a
+# CRLF checkout on Windows would make migrate refuse to run (CLAUDE.md rule 2).
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.zip binary

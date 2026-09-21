@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      # MySQL 8, not MariaDB. Development runs MariaDB locally, and this job is
+      # the only place the SQL is exercised against the real production engine.
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci_root
+          MYSQL_DATABASE: kody
+          MYSQL_USER: kody
+          MYSQL_PASSWORD: ci_pass
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci_root"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=3s --health-retries=20
+
+    env:
+      NODE_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: kody
+      DB_PASSWORD: ci_pass
+      DB_NAME: kody
+      TEST_REDIS_URL: redis://127.0.0.1:6379
+      MODEL_PRIMARY_PROVIDER: mock
+      MAIL_DRIVER: memory
+      PUSH_DRIVER: memory
+      AUTH_RATE_LOGIN_MAX: "10000"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package.json
+
+      - name: Install
+        working-directory: server
+        run: npm install
+
+      - name: Migrate
+        working-directory: server
+        run: node scripts/migrate.js
+
+      # A second migrate must be a no-op. If it is not, a migration is not
+      # idempotent and a redeploy would corrupt the schema.
+      - name: Migrations are idempotent
+        working-directory: server
+        run: |
+          out=$(node scripts/migrate.js)
+          echo "$out"
+          # The runner prints this exact sentence when there is nothing to do.
+          echo "$out" | grep -q "Nothing to apply, schema is current." || {
+            echo "A second migrate did something. Migrations must be idempotent."
+            exit 1
+          }
+
+      - name: Seed
+        working-directory: server
+        run: node scripts/seed-passwords.js
+
+      - name: Test on MySQL 8
+        working-directory: server
+        run: node --test tests/*.test.js
+
+      # Tests that only pass once are not much use to a developer running them
+      # all day, and a shared seed row mutated by one suite has broken another
+      # three times in this project.
+      - name: Tests are repeatable
+        working-directory: server
+        run: node --test tests/*.test.js
+
+      - name: Extension checks
+        run: node extension/build.js
+
+      - name: Package the extension
+        run: node extension/build.js --zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kody-extension
+          path: extension/dist/*.zip
+          if-no-files-found: error
+
+  standards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No em dashes or en dashes
+        run: |
+          if grep -rlP "[\x{2013}\x{2014}]" . \
+              --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=var --exclude-dir=dist; then
+            echo "Found an em dash or en dash. Use a plain hyphen."
+            exit 1
+          fi
+          echo "clean"
+
+      - name: No committed secrets
+        run: |
+          if grep -rniE "sk-ant-[a-zA-Z0-9]{16,}|SG\.[a-zA-Z0-9_-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----" . \
+              --exclude-dir=node_modules --exclude-dir=.git; then
+            echo "Possible secret committed."
+            exit 1
+          fi
+          echo "clean"
+
+      - name: No .env committed
+        run: |
+          if git ls-files | grep -E "(^|/)\.env$"; then
+            echo ".env must never be committed."
+            exit 1
+          fi
+          echo "clean"
+
+      - name: Applied migrations are never edited
+        run: |
+          # A migration that has already run somewhere must not change, or the
+          # checksum recorded in schema_migrations no longer matches.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin ${{ github.base_ref }} --depth=1
+            changed=$(git diff --name-only --diff-filter=M origin/${{ github.base_ref }} -- server/migrations/ || true)
+            if [ -n "$changed" ]; then
+              echo "These applied migrations were modified:"
+              echo "$changed"
+              echo "Add a new migration instead."
+              exit 1
+            fi
+          fi
+          echo "clean"

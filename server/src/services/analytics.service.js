@@ -1,0 +1,258 @@
+"use strict";
+const db = require("../db");
+
+/**
+ * Analytics for the admin overview.
+ *
+ * Every number here is derived from tables that already exist. `kody_messages`
+ * carries domain, tier, latency, tokens and model on every answer, which is
+ * why no new schema was needed.
+ *
+ * These queries scan the two largest tables, so the overview is cached. A
+ * dashboard that is sixty seconds stale is fine; a dashboard that runs six
+ * full scans on every page load is not.
+ */
+
+const CACHE_MS = Number(process.env.ANALYTICS_CACHE_MS || 60000);
+const cache = new Map();
+
+async function cached(key, fn) {
+  const hit = cache.get(key);
+  if (hit && hit.expires > Date.now()) return { ...hit.value, cached: true };
+  const value = await fn();
+  cache.set(key, { value, expires: Date.now() + CACHE_MS });
+  return { ...value, cached: false };
+}
+
+function clearCache() { cache.clear(); }
+
+const pct = (a, b) => (b === 0 ? null : Math.round(((a - b) / b) * 100));
+
+/* ---------------- headline numbers ---------------- */
+
+async function headline() {
+  const activeUsers = await db.one(
+    `SELECT COUNT(*) AS n FROM users WHERE is_active = 1 AND deleted_at IS NULL`
+  );
+  const activeRecently = await db.one(
+    `SELECT COUNT(DISTINCT user_id) AS n FROM kody_messages
+      WHERE role = 'user' AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)`
+  );
+
+  const today = await db.one(
+    `SELECT COUNT(*) AS n FROM kody_messages
+      WHERE role = 'user' AND created_at >= CURDATE()`
+  );
+  const yesterday = await db.one(
+    `SELECT COUNT(*) AS n FROM kody_messages
+      WHERE role = 'user' AND created_at >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+        AND created_at < CURDATE()`
+  );
+
+  // Tier 0 answers never touch a model, so this is both a cost and a quality figure.
+  const tiers = await db.one(
+    `SELECT COUNT(*) AS total,
+            SUM(CASE WHEN tier = 0 THEN 1 ELSE 0 END) AS tier0
+       FROM kody_messages
+      WHERE role = 'assistant' AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)`
+  );
+
+  const latency = await db.one(
+    `SELECT AVG(latency_ms) AS avgMs, MAX(latency_ms) AS maxMs
+       FROM kody_messages
+      WHERE role = 'assistant' AND tier > 0
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)`
+  );
+
+  // A degraded answer is one that told the user it could not answer properly.
+  const degraded = await db.one(
+    `SELECT COUNT(*) AS n FROM kody_messages
+      WHERE role = 'assistant' AND source_name IN ('Service unavailable','Malformed response')
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)`
+  );
+
+  const tokens = await db.one(
+    `SELECT COALESCE(SUM(input_tokens),0) AS inTok, COALESCE(SUM(output_tokens),0) AS outTok
+       FROM kody_messages
+      WHERE role = 'assistant' AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)`
+  );
+
+  const messages = await db.one(
+    `SELECT COUNT(*) AS n FROM messages WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)`
+  );
+  const files = await db.one(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(size_bytes),0) AS bytes
+       FROM attachments WHERE deleted_at IS NULL AND scan_status = 'clean'`
+  );
+
+  const total = Number(tiers.total) || 0;
+  return {
+    activeUsers: Number(activeUsers.n),
+    activeUsers7d: Number(activeRecently.n),
+    questionsToday: Number(today.n),
+    questionsYesterday: Number(yesterday.n),
+    questionsDelta: pct(Number(today.n), Number(yesterday.n)),
+    answers30d: total,
+    tier0Share: total ? Number(tiers.tier0) / total : 0,
+    avgLatencyMs: latency.avgMs ? Math.round(Number(latency.avgMs)) : 0,
+    maxLatencyMs: latency.maxMs ? Number(latency.maxMs) : 0,
+    degradedRate: total ? Number(degraded.n) / total : 0,
+    inputTokens30d: Number(tokens.inTok),
+    outputTokens30d: Number(tokens.outTok),
+    messages7d: Number(messages.n),
+    filesStored: Number(files.n),
+    storageMb: Math.round((Number(files.bytes) / (1024 * 1024)) * 10) / 10,
+  };
+}
+
+async function byDomain() {
+  const [rows] = await db.query(
+    `SELECT domain, COUNT(*) AS n,
+            SUM(CASE WHEN confidence = 'low' THEN 1 ELSE 0 END) AS lowConfidence
+       FROM kody_messages
+      WHERE role = 'assistant' AND domain IS NOT NULL
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      GROUP BY domain ORDER BY n DESC`
+  );
+  return rows.map(r => ({
+    domain: r.domain, n: Number(r.n), lowConfidence: Number(r.lowConfidence),
+  }));
+}
+
+async function byTier() {
+  const [rows] = await db.query(
+    `SELECT tier, COUNT(*) AS n, AVG(latency_ms) AS avgMs,
+            COALESCE(SUM(input_tokens),0) AS inTok,
+            COALESCE(SUM(output_tokens),0) AS outTok
+       FROM kody_messages
+      WHERE role = 'assistant' AND tier IS NOT NULL
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      GROUP BY tier ORDER BY tier`
+  );
+  return rows.map(r => ({
+    tier: Number(r.tier), n: Number(r.n),
+    avgMs: r.avgMs ? Math.round(Number(r.avgMs)) : 0,
+    inputTokens: Number(r.inTok), outputTokens: Number(r.outTok),
+  }));
+}
+
+async function byModel() {
+  const [rows] = await db.query(
+    `SELECT model_name AS model, COUNT(*) AS n,
+            COALESCE(SUM(input_tokens),0) AS inTok,
+            COALESCE(SUM(output_tokens),0) AS outTok,
+            AVG(latency_ms) AS avgMs
+       FROM kody_messages
+      WHERE role = 'assistant' AND model_name IS NOT NULL
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      GROUP BY model_name ORDER BY n DESC`
+  );
+  return rows.map(r => ({
+    model: r.model, n: Number(r.n),
+    inputTokens: Number(r.inTok), outputTokens: Number(r.outTok),
+    avgMs: r.avgMs ? Math.round(Number(r.avgMs)) : 0,
+  }));
+}
+
+/**
+ * The panel that matters: asked repeatedly, answered with low confidence, and
+ * no document backed it. This is the queue that says what to write next.
+ */
+async function unanswered({ limit = 10 } = {}) {
+  const lim = Math.min(Math.max(Number(limit) || 10, 1), 50);
+  const [rows] = await db.query(
+    `SELECT q.body AS question, a.domain,
+            COUNT(*) AS asked,
+            SUM(CASE WHEN a.confidence = 'low' THEN 1 ELSE 0 END) AS lowConfidence,
+            SUM(CASE WHEN a.used_retrieval = 0 THEN 1 ELSE 0 END) AS withoutDocument
+       FROM kody_messages a
+       JOIN kody_messages q
+         ON q.thread_id = a.thread_id AND q.role = 'user' AND q.id < a.id
+      WHERE a.role = 'assistant'
+        AND a.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        AND (a.confidence = 'low' OR a.used_retrieval = 0)
+        AND q.id = (SELECT MAX(q2.id) FROM kody_messages q2
+                     WHERE q2.thread_id = a.thread_id AND q2.role = 'user' AND q2.id < a.id)
+      GROUP BY q.body, a.domain
+      HAVING asked >= 1
+      ORDER BY asked DESC, lowConfidence DESC
+      LIMIT ?`,
+    [lim]
+  );
+  return rows.map(r => ({
+    question: r.question, domain: r.domain,
+    asked: Number(r.asked), lowConfidence: Number(r.lowConfidence),
+    withoutDocument: Number(r.withoutDocument),
+  }));
+}
+
+async function knowledgeHealth() {
+  const published = await db.one(
+    `SELECT COUNT(*) AS n FROM knowledge_docs WHERE status = 'published'`
+  );
+  const cited = await db.one(
+    `SELECT COUNT(DISTINCT c.doc_id) AS n
+       FROM kody_citations c JOIN knowledge_docs d ON d.id = c.doc_id
+      WHERE d.status = 'published'`
+  );
+  const sme = await db.one(
+    `SELECT SUM(status IN ('open','in_review')) AS open,
+            SUM(status = 'resolved' AND resolved_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS resolved30d
+       FROM sme_queue`
+  );
+  const codes = await db.one(
+    `SELECT COUNT(*) AS n FROM code_entries
+      WHERE (effective_to IS NULL OR effective_to >= CURDATE())`
+  );
+  return {
+    publishedDocs: Number(published.n),
+    citedDocs: Number(cited.n),
+    uncitedDocs: Number(published.n) - Number(cited.n),
+    smeOpen: Number(sme.open || 0),
+    smeResolved30d: Number(sme.resolved30d || 0),
+    currentCodeEntries: Number(codes.n),
+  };
+}
+
+/** Everything the overview screen needs, in one cached call. */
+async function overview() {
+  return cached("overview", async () => {
+    const [h, domains, tiers, models, gaps, knowledge] = await Promise.all([
+      headline(), byDomain(), byTier(), byModel(), unanswered({ limit: 8 }), knowledgeHealth(),
+    ]);
+    return { ...h, domains, tiers, models, unanswered: gaps, knowledge, generatedAt: new Date() };
+  });
+}
+
+/* ---------------- per person ---------------- */
+
+async function byPerson({ from, to } = {}) {
+  const params = [];
+  let range = "";
+  if (from) { range += " AND m.created_at >= ?"; params.push(from + " 00:00:00"); }
+  if (to)   { range += " AND m.created_at <= ?"; params.push(to + " 23:59:59"); }
+
+  const [rows] = await db.query(
+    `SELECT u.id AS userId, u.full_name AS fullName, u.email, u.team,
+            SUM(m.role = 'user') AS questions,
+            SUM(m.role = 'assistant' AND m.tier = 0) AS lookups,
+            COALESCE((SELECT COUNT(*) FROM kody_feedback f
+                       WHERE f.user_id = u.id AND f.vote = 'up'), 0) AS helpfulVotes,
+            COALESCE((SELECT SUM(points) FROM point_events p WHERE p.user_id = u.id), 0) AS points
+       FROM users u
+       LEFT JOIN kody_messages m ON m.user_id = u.id ${range ? "AND 1=1" + range : ""}
+      WHERE u.deleted_at IS NULL
+      GROUP BY u.id ORDER BY questions DESC, u.full_name`,
+    params
+  );
+  return rows.map(r => ({
+    userId: r.userId, fullName: r.fullName, email: r.email, team: r.team,
+    questions: Number(r.questions || 0), lookups: Number(r.lookups || 0),
+    helpfulVotes: Number(r.helpfulVotes || 0), points: Number(r.points || 0),
+  }));
+}
+
+module.exports = {
+  overview, headline, byDomain, byTier, byModel, unanswered,
+  knowledgeHealth, byPerson, clearCache, CACHE_MS,
+};
