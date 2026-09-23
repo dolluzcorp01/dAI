@@ -92,7 +92,7 @@ router.post("/forgot-password", loginLimiter, (req, res) => {
     ok: true,
     resetUrl,
     message: resetUrl
-      ? "Your Kody password is your Dolluz sign-in password. Reset it in dAdmin, then sign in here again."
+      ? "Your Kody password is your Dolluz sign-in password. Open dAdmin, use Forgot password on the sign-in page, then sign in here again."
       : "Your Kody password is your Dolluz sign-in password. Ask your administrator to reset it in dAdmin.",
   });
 });

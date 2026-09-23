@@ -35,7 +35,7 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | server/src/lib/tokens.js | Accept https://<id>.chromiumapp.org/ callbacks only for ids in EXTENSION_IDS (docs/14). |
 | server/src/services/kody.service.js | Store and read lookup_description (migration 007 added the column; the service never used it). |
 | server/src/services/auth.service.js | Phase 1.1. login() tries dadmin.employee first and falls back to a local Kody password only outside production; refresh() re-checks active and app_dAI for a user that carries an emp_id, and revokes every session for that person when access is gone. |
-| server/src/routes/auth.routes.js | Phase 1.1. POST /api/auth/forgot-password, which points at the dAdmin reset flow. The password belongs to dAdmin, so dAI never resets one. |
+| server/src/routes/auth.routes.js | Phase 1.1. POST /api/auth/forgot-password, which points at the dAdmin reset flow. The password belongs to dAdmin, so dAI never resets one. dAdmin has no separate reset page, so DADMIN_RESET_URL is its sign-in page and the message names the Forgot password button. |
 | server/src/app.js | Phase 1.2. Mounts the dAdmin service token middleware on /api/admin, /api/knowledge, /api/kody/sme, /api/users/admin and POST /api/notifications/announce, before the routers and nowhere else. |
 | server/src/middleware/auth.js | Phase 1.2. authenticate() passes a request straight through when a dAdmin service token has already been verified and mapped to a user. A service call holds no session, so there is nothing to look up. |
 | server/src/config.js | Phase 1.1. Added the dadmin block: DADMIN_DB_NAME, DADMIN_SHARED_JWT_SECRET, DADMIN_RESET_URL. |

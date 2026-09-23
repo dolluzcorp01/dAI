@@ -33,7 +33,10 @@ Step 1 - access plumbing (dAdmin only)
 - AccessGate.js and AccessContext.js: add "dAI": "app_dAI" to CATEGORY_TO_APP_FLAG.
 - Emp_App_Access.js: add the dAI toggle next to dSpr/dNews (topTierOnly: false).
 - .env keys (names only, in the README or a .env.example): DAI_API_URL, DAI_SHARED_JWT_SECRET
-  (same value as dAdmin's JWT_SECRET; dAI verifies with it).
+  (a dedicated random secret, NOT dAdmin's own JWT_SECRET. It must equal dAI's
+  DADMIN_SHARED_JWT_SECRET, which is what dAI verifies these tokens with. Keeping it separate
+  means a dAdmin user session token can never be replayed against dAI, and either side can
+  rotate it without signing anyone out.)
 
 Step 2 - the proxy route: src/backend_routes/dAI_Admin_server.js, mounted at /api/dai
 - Every route: verifyJWT, then requirePageAccess('dAI', '<Page>'), then forward to

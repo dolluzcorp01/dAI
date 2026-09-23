@@ -337,7 +337,11 @@ describe("forgot password", () => {
     assert.equal(b.status, 200);
     assert.deepEqual(a.body, b.body, "no way to tell whether an account exists");
     assert.match(a.body.message, /dAdmin/, "it names where the password lives");
-    assert.equal("resetUrl" in a.body, true);
+    assert.equal(a.body.resetUrl, config.dadmin.resetUrl || null, "it hands back the configured page");
+    if (config.dadmin.resetUrl) {
+      assert.match(a.body.message, /Forgot password/,
+        "dAdmin has no separate reset page, so it says which button to use");
+    }
   });
 });
 
