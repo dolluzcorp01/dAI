@@ -202,8 +202,11 @@ describe("directory", () => {
 
   test("searches by name", async () => {
     const r = await api("GET", "/api/users?q=pavithran", null, memberToken);
-    assert.equal(r.body.users.length, 1);
-    assert.equal(r.body.users[0].fullName, "Pavithran R");
+    // dAI: since Phase 1.1 a real dadmin employee signs in and gets a Kody user,
+    // and two people can share part of a name. Assert the seeded user is found,
+    // not that nobody else matches.
+    assert.ok(r.body.users.length >= 1, "the search finds somebody");
+    assert.ok(r.body.users.some(u => u.fullName === "Pavithran R"), "including the seeded user");
   });
 
   test("searches by skill, which is the v10 behaviour", async () => {

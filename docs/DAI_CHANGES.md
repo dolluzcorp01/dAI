@@ -19,6 +19,9 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | web/package.json | The web SDK imports socket.io-client. |
 | server/migrations/011_dadmin_link.sql | Phase 1.1. users.emp_id VARCHAR(20) NULL UNIQUE, so a Kody user points back at the employee it was created from. |
 | server/src/services/dadmin.service.js | Phase 1.1. Reads dadmin.employee (the nine granted columns only), bcrypt-compares account_pass, maps the access level to a role on first creation, and creates, adopts or refreshes the Kody user. |
+| server/src/middleware/dadmin-service.js | Phase 1.2. Verifies a short lived JWT signed with DADMIN_SHARED_JWT_SECRET, audience dai-admin, maps emp_id to the Kody user and their roles, and leaves the routers' own requireRole checks to do the rest. |
+| server/scripts/verify-1.1.js | Phase 1.1 done-check, run by hand against a live API. Reads the granted columns only, never writes to dadmin, prints no password or token. |
+| server/tests/dadmin-service.test.js | Phase 1.2. 14 tests, including that a service token opens nothing outside the whitelist. |
 | server/tests/dadmin.test.js | Phase 1.1. 20 tests. dadmin is read only and CI has no dadmin database, so the two reader functions are replaced by a fake employee table; everything else runs for real. |
 
 ## Module files changed
@@ -33,11 +36,13 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | server/src/services/kody.service.js | Store and read lookup_description (migration 007 added the column; the service never used it). |
 | server/src/services/auth.service.js | Phase 1.1. login() tries dadmin.employee first and falls back to a local Kody password only outside production; refresh() re-checks active and app_dAI for a user that carries an emp_id, and revokes every session for that person when access is gone. |
 | server/src/routes/auth.routes.js | Phase 1.1. POST /api/auth/forgot-password, which points at the dAdmin reset flow. The password belongs to dAdmin, so dAI never resets one. |
+| server/src/app.js | Phase 1.2. Mounts the dAdmin service token middleware on /api/admin, /api/knowledge, /api/kody/sme, /api/users/admin and POST /api/notifications/announce, before the routers and nowhere else. |
+| server/src/middleware/auth.js | Phase 1.2. authenticate() passes a request straight through when a dAdmin service token has already been verified and mapped to a user. A service call holds no session, so there is nothing to look up. |
 | server/src/config.js | Phase 1.1. Added the dadmin block: DADMIN_DB_NAME, DADMIN_SHARED_JWT_SECRET, DADMIN_RESET_URL. |
 | server/package.json | Phase 1.1. Added bcryptjs, to read the $2b hashes dAdmin writes. Node has no built-in bcrypt. Approved before adding. |
 | server/src/services/codes.service.js | answerFromCode formatted effective_from with String(), and mysql2 returns a Date, so every tier 0 answer read "Thu Jan 01" instead of "2026-01-01". Now formats a Date as YYYY-MM-DD. Test in kody.test.js. Found in the Step 1 live run. |
 | server/src/services/conversations.service.js | get() now names a DM after the other member, as listMine() already did. |
-| server/tests/users.test.js | Restores the member's seeded settings and skills first, so the suite passes on a second run (module rule 16). |
+| server/tests/users.test.js | Restores the member's seeded settings and skills first, so the suite passes on a second run (module rule 16). Phase 1.1: "searches by name" asserted that a directory search for pavithran returns exactly one row. Once a real dadmin employee signs in, two people can share part of a name, so it now asserts the seeded user is among the results. |
 | .env.example | Rewritten: the old one used key names config.js never read (DO_SPACES_*, PGVECTOR_URL). |
 | .env.example, CLAUDE.md | Local API port 4000 -> 4014 (PORT, PUBLIC_URL), requested 2026-09-21. Module code unchanged: config.js reads PORT. The container port in Dockerfile and deploy/ stays 4000. |
 | .env.example, CLAUDE.md | TEST_REDIRECT added (auth.test.js defaults to :5173, which the example allowlist does not contain), and "cd web && npm install" added to Run it (integration.test.js imports the SDK, which needs socket.io-client). Found by the Step 1 baseline run. |

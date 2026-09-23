@@ -14,6 +14,7 @@ const searchRoutes = require("./routes/search.routes");
 const notificationsRoutes = require("./routes/notifications.routes");
 const adminRoutes = require("./routes/admin.routes");
 const { redisHealthy } = require("./realtime/redis");
+const { dadminServiceMiddleware } = require("./middleware/dadmin-service");   // dAI: docs/PHASES.md 1.2
 
 const MIGRATIONS_DIR = path.join(__dirname, "..", "migrations");
 
@@ -68,6 +69,17 @@ function createApp() {
     out.ok = out.db.ok && out.migrations.ok && out.redis.ok;
     res.status(out.ok ? 200 : 503).json(out);
   });
+
+  // dAI: the dAdmin console calls these five, and only these five, with a short
+  // lived service token (docs/PHASES.md 1.2). The whitelist is explicit and sits
+  // before the routers, so a route added later is NOT reachable by a service
+  // token unless someone adds it here on purpose. Every other route keeps user
+  // tokens only. A request without a service token passes straight through.
+  app.use("/api/admin", dadminServiceMiddleware);
+  app.use("/api/knowledge", dadminServiceMiddleware);
+  app.use("/api/kody/sme", dadminServiceMiddleware);
+  app.use("/api/users/admin", dadminServiceMiddleware);
+  app.post("/api/notifications/announce", dadminServiceMiddleware);
 
   app.use("/api/auth", authRoutes);
   app.use("/api/users", usersRoutes);

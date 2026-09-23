@@ -10,6 +10,11 @@ const T = require("../lib/tokens");
  * minutes. The session lookup closes that window.
  */
 async function authenticate(req, res, next) {
+  // dAI: a dAdmin service token was already verified and mapped to a user by
+  // middleware/dadmin-service.js on the whitelisted paths (docs/PHASES.md 1.2).
+  // It holds no session, so there is nothing here for it to look up.
+  if (req.auth && req.auth.service) return next();
+
   const header = req.get("authorization") || "";
   const match = header.match(/^Bearer\s+(.+)$/i);
   if (!match) {
