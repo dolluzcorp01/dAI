@@ -6,7 +6,7 @@ by a real person. PENDING = not started. Update this table at the end of every s
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Assemble the 15 modules, fill what they never shipped, pass the suite on real MySQL 8 + Redis | DONE |
-| 1 | Sign-in through dAdmin, the dAI React app (Ask Kody), SME loop with notifications, dAI admin pages in dAdmin | PENDING |
+| 1 | Sign-in through dAdmin, the dAI client (Ask Kody), SME loop with notifications, dAI admin pages in dAdmin | 1.1 DONE, 1.2 to 1.4 PENDING |
 | 2 | Team chat, files with virus scan, search, notifications UI, daily digest by SendGrid | BUILT on the server, UI PENDING |
 | 3 | Chrome extension: missing files, real browser test, Web Store listing | PENDING |
 | 4 | Production on DigitalOcean: droplet, managed MySQL, Spaces, Redis, ClamAV, Caddy, first real Claude call, CMS code import | PENDING |
@@ -25,6 +25,19 @@ by a real person. PENDING = not started. Update this table at the end of every s
     - Forgot password points to the dAdmin reset flow (the password belongs to dAdmin).
     Done-check: a dadmin employee with app_dAI = 1 signs in with no one creating anything by hand;
     app_dAI = 0 is refused; turning it off ends their session on next refresh.
+    DONE 2026-09-23. Migration 011, src/services/dadmin.service.js, login and refresh in
+    auth.service.js, forgot-password in auth.routes.js, 20 tests in tests/dadmin.test.js.
+    Learned along the way:
+    - dadmin is read only for dAI and the SQL is run by Shoban, so the DB user holds column
+      level SELECT on nine columns of dadmin.employee. account_pass_text, the bank columns,
+      aadhar_number and pan_number are refused by MySQL, not by remembering to avoid them.
+    - The password is checked before active and app_dAI, so someone without the password
+      cannot learn whether an account exists or is enabled.
+    - Kody users created before Phase 1, including the seed users, have no emp_id. A first
+      dadmin sign-in with a matching email adopts that row rather than colliding on the
+      unique email, and adoption never touches roles.
+    - bcryptjs was added to read dAdmin's $2b hashes. Node has no built-in bcrypt.
+    - A local Kody password still works in development and tests; production refuses it.
 1.2 Service auth for the dAdmin console
     - Middleware accepting a 60-second JWT signed with DADMIN_SHARED_JWT_SECRET,
       payload { emp_id, aud: "dai-admin" }. Maps emp_id to the Kody user and their roles.

@@ -3,6 +3,7 @@ const db = require("../db");
 const config = require("../config");
 const { hashPassword, verifyPassword, fakeVerify } = require("../lib/password");
 const T = require("../lib/tokens");
+const dadmin = require("./dadmin.service");   // dAI: the dAdmin link (docs/PHASES.md 1.1)
 
 class AuthError extends Error {
   constructor(status, code, message) {
@@ -128,11 +129,39 @@ async function issueSession(userId, surface, ctx = {}) {
 
 /**
  * Web login. Returns tokens directly.
+ *
+ * dAI: real people sign in with their dadmin.employee credentials, and the Kody
+ * user is created or linked on the way through (docs/PHASES.md 1.1). A local
+ * Kody password is only a development and test convenience, so production
+ * refuses it: there, dadmin is the only way in.
  */
 async function login({ email, password, surface = "web" }, ctx = {}) {
-  const user = await authenticate(email, password, ctx);
+  let user = null;
+  try {
+    user = await dadmin.signIn(email, password);
+  } catch (err) {
+    if (err instanceof dadmin.DadminError) {
+      await audit(null, {
+        actorId: null, action: "auth.dadmin_login_refused", entityType: "user", entityId: null,
+        ip: ctx.ip, userAgent: ctx.userAgent, meta: { reason: err.code },
+      });
+      throw new AuthError(err.status, err.code, err.message);
+    }
+    throw err;
+  }
+
+  if (!user) {
+    if (config.isProd()) {
+      // No such employee. Burn comparable time so timing cannot enumerate, and
+      // give the same answer as a wrong password.
+      await fakeVerify();
+      throw new AuthError(401, "invalid_credentials", "Email or password is incorrect.");
+    }
+    user = await authenticate(email, password, ctx);
+  }
+
   const tokens = await issueSession(user.id, surface, ctx);
-  return { user, ...tokens };
+  return { user: { id: user.id, email: user.email, fullName: user.fullName }, ...tokens };
 }
 
 /**
@@ -224,6 +253,27 @@ async function refresh({ refreshToken }, ctx = {}) {
 
   if (new Date(session.expires_at) < new Date()) {
     throw new AuthError(401, "refresh_expired", "Session expired. Sign in again.");
+  }
+
+  // dAI: re-check dadmin on every refresh, so deactivating someone or turning
+  // off app_dAI in dAdmin ends their access within an access token's lifetime
+  // rather than after a 30 day refresh token expires (docs/PHASES.md 1.1).
+  const owner = await db.one(`SELECT emp_id AS empId FROM users WHERE id = ?`, [session.user_id]);
+  if (owner && owner.empId) {
+    const revoked = await dadmin.accessRevoked(owner.empId);
+    if (revoked) {
+      await db.query(
+        `UPDATE sessions SET revoked_at = NOW(), revoked_reason = 'dadmin_access_revoked'
+          WHERE user_id = ? AND revoked_at IS NULL`,
+        [session.user_id]
+      );
+      await audit(null, {
+        actorId: session.user_id, action: "auth.dadmin_access_revoked", entityType: "user",
+        entityId: session.user_id, ip: ctx.ip, userAgent: ctx.userAgent, meta: { reason: revoked },
+      });
+      throw new AuthError(403, "dai_not_enabled",
+        "This account no longer has access to dAI. Sign in again once it is enabled in dAdmin.");
+    }
   }
 
   const next = T.newRefreshToken();

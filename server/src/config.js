@@ -54,6 +54,18 @@ const config = {
     rateRefreshMax: int("AUTH_RATE_REFRESH_MAX", 60),
   },
 
+  // dAI: the dAdmin link (docs/PHASES.md 1.1 and 1.2). dadmin lives on the same
+  // MySQL server and dAI only ever reads it: the database user holds SELECT on
+  // the sign-in columns of dadmin.employee and nothing else.
+  dadmin: {
+    dbName: optional("DADMIN_DB_NAME", "dadmin"),
+    // A dedicated random secret shared only with dAdmin's DAI_SHARED_JWT_SECRET,
+    // never dAdmin's own JWT_SECRET. Used by the service-token middleware in 1.2.
+    sharedJwtSecret: optional("DADMIN_SHARED_JWT_SECRET", ""),
+    // Where to send someone who forgot their password. The password belongs to dAdmin.
+    resetUrl: optional("DADMIN_RESET_URL", ""),
+  },
+
   // Extension ids allowed to receive the auth handoff (chromiumapp.org callback).
   // Comma separated. Never a wildcard. See docs/14-extension.md.
   extensionIds: optional("EXTENSION_IDS", "")

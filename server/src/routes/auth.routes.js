@@ -83,6 +83,20 @@ router.post("/logout", async (req, res) => {
   } catch (err) { handle(res, err); }
 });
 
+/* POST /api/auth/forgot-password
+   dAI: the password belongs to dAdmin, so dAI never resets one (docs/PHASES.md 1.1).
+   The same answer is given whatever the email, so this cannot enumerate accounts. */
+router.post("/forgot-password", loginLimiter, (req, res) => {
+  const resetUrl = config.dadmin.resetUrl || null;
+  res.json({
+    ok: true,
+    resetUrl,
+    message: resetUrl
+      ? "Your Kody password is your Dolluz sign-in password. Reset it in dAdmin, then sign in here again."
+      : "Your Kody password is your Dolluz sign-in password. Ask your administrator to reset it in dAdmin.",
+  });
+});
+
 /* GET /api/auth/me */
 router.get("/me", authenticate, async (req, res) => {
   res.json({

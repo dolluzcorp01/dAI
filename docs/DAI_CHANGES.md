@@ -17,6 +17,9 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | server/tests/helpers/instance.js | deploy.test.js spawns it as the second API instance. |
 | server/scripts/seed-passwords.js | CI calls it. Dev only, refuses production. |
 | web/package.json | The web SDK imports socket.io-client. |
+| server/migrations/011_dadmin_link.sql | Phase 1.1. users.emp_id VARCHAR(20) NULL UNIQUE, so a Kody user points back at the employee it was created from. |
+| server/src/services/dadmin.service.js | Phase 1.1. Reads dadmin.employee (the nine granted columns only), bcrypt-compares account_pass, maps the access level to a role on first creation, and creates, adopts or refreshes the Kody user. |
+| server/tests/dadmin.test.js | Phase 1.1. 20 tests. dadmin is read only and CI has no dadmin database, so the two reader functions are replaced by a fake employee table; everything else runs for real. |
 
 ## Module files changed
 | File | Change |
@@ -28,6 +31,10 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | server/src/routes/chat.routes.js | One line: call the fan-out after a REST send. |
 | server/src/lib/tokens.js | Accept https://<id>.chromiumapp.org/ callbacks only for ids in EXTENSION_IDS (docs/14). |
 | server/src/services/kody.service.js | Store and read lookup_description (migration 007 added the column; the service never used it). |
+| server/src/services/auth.service.js | Phase 1.1. login() tries dadmin.employee first and falls back to a local Kody password only outside production; refresh() re-checks active and app_dAI for a user that carries an emp_id, and revokes every session for that person when access is gone. |
+| server/src/routes/auth.routes.js | Phase 1.1. POST /api/auth/forgot-password, which points at the dAdmin reset flow. The password belongs to dAdmin, so dAI never resets one. |
+| server/src/config.js | Phase 1.1. Added the dadmin block: DADMIN_DB_NAME, DADMIN_SHARED_JWT_SECRET, DADMIN_RESET_URL. |
+| server/package.json | Phase 1.1. Added bcryptjs, to read the $2b hashes dAdmin writes. Node has no built-in bcrypt. Approved before adding. |
 | server/src/services/codes.service.js | answerFromCode formatted effective_from with String(), and mysql2 returns a Date, so every tier 0 answer read "Thu Jan 01" instead of "2026-01-01". Now formats a Date as YYYY-MM-DD. Test in kody.test.js. Found in the Step 1 live run. |
 | server/src/services/conversations.service.js | get() now names a DM after the other member, as listMine() already did. |
 | server/tests/users.test.js | Restores the member's seeded settings and skills first, so the suite passes on a second run (module rule 16). |
