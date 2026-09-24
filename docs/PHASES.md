@@ -83,6 +83,23 @@ by a real person. PENDING = not started. Update this table at the end of every s
     - Thumbs down notifies every coordinator/admin (kind "sme", no answer text in the body).
     - Resolution notifies the person who raised it.
     Done-check: both bells light up in a live run.
+    DONE 2026-09-24. notifySmeRaised and notifySmeResolved in kody.service.js, called from
+    feedback() and resolveSme(). 9 tests in tests/sme-loop.test.js.
+    Live run against the API: gopi (member) asked a question carrying fake patient detail and
+    voted the answer down; shoban (super_admin) got "SME review", refType sme_queue, refId 39,
+    with none of the question or answer text in it. shoban resolved it into document 119 and
+    gopi got "Your report was answered", refType knowledge_doc, refId 119, again with no
+    question and no resolution text. Full suite 513/515 twice (the 2 are Phase 3).
+    Learned along the way:
+    - The notification carries no question text either, not just no answer text. A question an
+      associate typed can hold claim detail exactly as an answer can (module rule 17).
+    - Who is told matches the roles that can open GET /api/kody/sme, including sub_admin since
+      the gate above. A test asserts the two lists stay together, because drifting apart means
+      someone is told about a queue they cannot open.
+    - Notifying is best effort. A notification failure must not fail the vote or the resolution.
+    - Two module tests had to change, both from data that grows rather than from this work:
+      chat.test.js read the first 500 messages of a DM that now holds 609, and the digest pair
+      in notifications.test.js unread a history larger than the 200 a digest covers per run.
 1.4 dAI React app in web/ (CRA, like dAdmin), from prototypes/kody_prototype_v10.jsx
     - Login screen from v11 + web/src/screens/LoginScreen.jsx, wired to the SDK.
     - Ask tab, History, Saved, recent codes strip, points, feedback buttons.

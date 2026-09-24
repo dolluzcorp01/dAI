@@ -464,7 +464,16 @@ describe("the email digest", () => {
   test("sends one email covering the unread notifications", async () => {
     transport.clearSent();
     await db.query("UPDATE notification_prefs SET email_digest = 1 WHERE user_id = ?", [vignesh.id]);
-    await db.query("UPDATE notifications SET read_at = NULL, delivered_email = 0 WHERE user_id = ?", [vignesh.id]);
+    // dAI: a digest covers at most 200 notifications per run. This user's history
+    // grows with every run, and since Phase 1.3 a coordinator is also told about
+    // every SME report, so unreading all of it made the next test find a second
+    // batch waiting and report "sent". Park everything, then unread a handful:
+    // the pair of tests is about not sending the same ones twice (rule 16).
+    await db.query("UPDATE notifications SET read_at = NOW(), delivered_email = 1 WHERE user_id = ?", [vignesh.id]);
+    await db.query(
+      "UPDATE notifications SET read_at = NULL, delivered_email = 0 WHERE user_id = ? ORDER BY id DESC LIMIT 5",
+      [vignesh.id]
+    );
 
     const out = await notify.sendDigest(vignesh.id);
     assert.equal(out.status, "sent");

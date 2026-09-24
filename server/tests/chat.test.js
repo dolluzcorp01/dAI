@@ -365,10 +365,14 @@ describe("message mutations", () => {
     const del = await api("DELETE", `/api/messages/${target}?scope=me`, null, pavithran.token);
     assert.equal(del.status, 200);
 
-    const mine = await api("GET", `/api/conversations/${dmId}/messages?afterSeq=0&limit=500`, null, pavithran.token);
+    // dAI: read the tail, not the first 500. This DM grows every run, and once
+    // it passed 500 messages a window from seq 0 no longer contained the message
+    // the test had just posted.
+    const from = Number(posted.body.message.seq) - 1;
+    const mine = await api("GET", `/api/conversations/${dmId}/messages?afterSeq=${from}&limit=5`, null, pavithran.token);
     assert.ok(!mine.body.messages.some(m => Number(m.id) === Number(target)), "hidden for me");
 
-    const theirs = await api("GET", `/api/conversations/${dmId}/messages?afterSeq=0&limit=500`, null, shoban.token);
+    const theirs = await api("GET", `/api/conversations/${dmId}/messages?afterSeq=${from}&limit=5`, null, shoban.token);
     assert.ok(theirs.body.messages.some(m => Number(m.id) === Number(target)), "still visible to the author");
   });
 

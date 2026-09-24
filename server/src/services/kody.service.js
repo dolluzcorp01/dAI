@@ -7,6 +7,7 @@ const prompts = require("../ai/prompts");
 const codes = require("./codes.service");
 const msgs = require("./messages.service");
 const bus = require("../realtime/bus");
+const notify = require("./notifications.service");   // dAI: the SME loop (docs/PHASES.md 1.3)
 const { audit } = require("./auth.service");
 
 class KodyError extends Error {
@@ -332,6 +333,78 @@ async function askInConversation(userId, conversationId, question) {
 /* ---------------- feedback, points and the SME queue ---------------- */
 
 /**
+ * dAI: the SME loop notifications (docs/PHASES.md 1.3).
+ *
+ * The walkthrough found the gap: a thumbs down opened an sme_queue row that
+ * nobody was told about, and resolving it told the person who reported it
+ * nothing either. Both ends now ring a bell.
+ *
+ * No answer text and no question text goes into a notification. A question an
+ * associate typed can carry claim detail just as an answer can, and a
+ * notification is read on a lock screen and can leave in an email digest
+ * (module rule 17, docs/11-notifications.md). The notification says what
+ * happened and points at the queue item; the text is read inside Kody.
+ */
+
+/** Must match the roles that can reach GET /api/kody/sme. */
+const SME_ROLES = ["admin", "super_admin", "coordinator", "sub_admin"];
+
+async function smeReviewers(exceptUserId) {
+  const [rows] = await db.query(
+    `SELECT DISTINCT u.id
+       FROM users u
+       JOIN user_roles ur ON ur.user_id = u.id
+       JOIN roles r ON r.id = ur.role_id
+      WHERE r.code IN (?) AND u.is_active = 1 AND u.deleted_at IS NULL
+        AND (? IS NULL OR u.id <> ?)`,
+    [SME_ROLES, exceptUserId || null, exceptUserId || 0]
+  );
+  return rows.map(r => r.id);
+}
+
+/** Best effort: a notification failure must never fail the vote or the resolution. */
+async function notifySmeRaised({ smeQueueId, raisedBy, domain }) {
+  try {
+    const reviewers = await smeReviewers(raisedBy);
+    for (const userId of reviewers) {
+      await notify.create(userId, {
+        kind: "sme",
+        title: "SME review",
+        body: `A Kody answer${domain ? " about " + domain : ""} was marked not helpful and is waiting in the SME queue.`,
+        refType: "sme_queue", refId: smeQueueId,
+        actorId: raisedBy || null,
+        channels: { inApp: true },
+      });
+    }
+    return reviewers.length;
+  } catch (err) {
+    console.error("SME raised notification failed:", err.message);
+    return 0;
+  }
+}
+
+async function notifySmeResolved({ smeQueueId, raisedBy, resolvedBy, docId, published }) {
+  if (!raisedBy || Number(raisedBy) === Number(resolvedBy)) return 0;
+  try {
+    await notify.create(raisedBy, {
+      kind: "sme",
+      title: "Your report was answered",
+      body: published
+        ? "An expert corrected the answer you reported, and it is now part of what Kody knows."
+        : "An expert answered the report you raised. The correction is waiting to be published.",
+      refType: published && docId ? "knowledge_doc" : "sme_queue",
+      refId: published && docId ? docId : smeQueueId,
+      actorId: resolvedBy || null,
+      channels: { inApp: true },
+    });
+    return 1;
+  } catch (err) {
+    console.error("SME resolved notification failed:", err.message);
+    return 0;
+  }
+}
+
+/**
  * A thumbs up credits points, once, capped daily. A thumbs down opens an SME
  * review. The idempotency key is what stops a one-click button becoming a
  * money button.
@@ -370,6 +443,12 @@ async function feedback(userId, kodyMessageId, vote, comment) {
         [kodyMessageId, userId]
       );
       smeId = res.insertId;
+      // dAI: tell the people who work the queue. Only for a new item, so a
+      // second thumbs down on the same answer does not ring the bell twice.
+      const answer = await db.one(`SELECT domain FROM kody_messages WHERE id = ?`, [kodyMessageId]);
+      await notifySmeRaised({
+        smeQueueId: smeId, raisedBy: userId, domain: answer ? answer.domain : null,
+      });
     }
   }
 
@@ -497,6 +576,10 @@ async function resolveSme(smeUserId, smeQueueId, { resolution, title, domain, pu
 
   if (item.raisedBy) {
     await creditPoints(item.raisedBy, "sme_accepted", "sme_queue", smeQueueId);
+    // dAI: tell the person who reported it that it was answered.
+    await notifySmeResolved({
+      smeQueueId, raisedBy: item.raisedBy, resolvedBy: smeUserId, docId, published: publish,
+    });
   }
   await audit(null, {
     actorId: smeUserId, action: "kody.sme_resolved", entityType: "sme_queue", entityId: smeQueueId,
@@ -508,4 +591,5 @@ async function resolveSme(smeUserId, smeQueueId, { resolution, title, domain, pu
 module.exports = {
   KodyError, ask, askInConversation, getThread, listThreads, createThread,
   feedback, creditPoints, pointsBalance, smeQueue, resolveSme, hydrateMessages,
+  SME_ROLES, smeReviewers,   // dAI: docs/PHASES.md 1.3
 };
