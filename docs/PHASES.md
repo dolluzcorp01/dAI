@@ -6,9 +6,9 @@ by a real person. PENDING = not started. Update this table at the end of every s
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Assemble the 15 modules, fill what they never shipped, pass the suite on real MySQL 8 + Redis | DONE |
-| 1 | Sign-in through dAdmin, the dAI client (Ask Kody), SME loop with notifications, dAI admin pages in dAdmin | 1.1 and 1.2 DONE, 1.3 and 1.4 PENDING |
+| 1 | Sign-in through dAdmin, the extension client (Ask Kody), SME loop with notifications, dAI admin pages in dAdmin | 1.1, 1.2, 1.3 DONE. 1.4 in progress |
 | 2 | Team chat, files with virus scan, search, notifications UI, daily digest by SendGrid | BUILT on the server, UI PENDING |
-| 3 | Chrome extension: missing files, real browser test, Web Store listing | PENDING |
+| 3 | Chrome extension: packaging and the Web Store listing. The missing files and the real browser test moved into 1.4 | PENDING |
 | 4 | Production on DigitalOcean: droplet, managed MySQL, Spaces, Redis, ClamAV, Caddy, first real Claude call, CMS code import | PENDING |
 | 5 | Mobile apps, Edge/Firefox/Safari, pgvector if MySQL full-text is not enough | LATER |
 
@@ -100,16 +100,28 @@ by a real person. PENDING = not started. Update this table at the end of every s
     - Two module tests had to change, both from data that grows rather than from this work:
       chat.test.js read the first 500 messages of a DM that now holds 609, and the digest pair
       in notifications.test.js unread a history larger than the 200 a digest covers per run.
-1.4 dAI React app in web/ (CRA, like dAdmin), from prototypes/kody_prototype_v10.jsx
-    - Login screen from v11 + web/src/screens/LoginScreen.jsx, wired to the SDK.
-    - Ask tab, History, Saved, recent codes strip, points, feedback buttons.
-    - Chats tab shows "coming in Phase 2" but the layout is in place.
-    Done-check: sign in with a dadmin account, ask CO-45 and a general question, thumbs down,
-    see it appear in the dAdmin SME queue. Screenshots in the PR.
+1.4 The extension is the client. Re-scoped 2026-09-24: Kody is a browser extension, NOT a
+    React web app, and none is to be built. web/ stays as the client SDK the extension
+    imports, so a web client remains possible later and the API keeps one client contract.
+    1.4a Say so in CLAUDE.md, PHASES.md and PROMPT_dAI.md.
+    1.4b Pull forward from Phase 3 the files the extension names but never shipped:
+         src/popup/index.html, src/popup/popup.js, src/sidepanel/index.html,
+         src/content/bubble.css, and icons at 16, 32, 48 and 128.
+         Done-check: the 2 failing extension tests pass and the "static safety" group,
+         which could not even load, loads and passes. node extension/build.js passes.
+    1.4c The side panel, from prototypes/kody_prototype_v10.jsx: Ask, History, Saved, the
+         recent codes strip, points and the feedback buttons, same look, no redesign.
+         The Chats tab shows "coming in Phase 2" with the layout in place. Every call goes
+         through web/src/api. No token in the content script (rule 22).
+    1.4d The sign-in page on the dAI host that hands the login back to the extension, from
+         prototypes/kody_auth_flow_v11.jsx. It signs in with dAdmin credentials, as 1.1 does.
+    Done-check for 1.4 as a whole, in a real Chrome: load the unpacked extension, sign in
+    with a dAdmin password, click the bubble, ask CO-45 and a general question, thumbs down
+    one, and see it reach the dAdmin SME queue. Screenshots of each step.
 1.5 dAdmin dAI pages (separate repo, see PROMPT_dAdmin.md)
 
 ## Known gaps carried forward (do not lose these)
-- Extension: popup HTML/JS, side panel HTML, bubble.css, icons (Phase 3).
+- Extension: popup HTML/JS, side panel HTML, bubble.css, icons. Moved from Phase 3 into 1.4b.
 - deploy/: Caddyfile and backup.sh are referenced but missing (Phase 4).
 - Real model, SendGrid, Spaces and ClamAV never exercised (Phase 4).
 - CPT (AMA) and CDT (ADA) licences before importing those code sets (Phase 4).

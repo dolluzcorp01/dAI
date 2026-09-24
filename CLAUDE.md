@@ -7,8 +7,11 @@ These rules survive context compaction. If a rule and a request conflict, stop a
 dAI is Dolluz Corp's Kody assistant: a floating bubble for healthcare back-office associates,
 with Ask Kody (codes, knowledge, AI), team chat, files, search and notifications.
 - server/     Express API, MySQL 8, Socket.IO. Built from the 15 Kody modules.
-- web/        Kody client SDK today; the dAI React app is created here in Phase 1.
-- extension/  Chrome MV3 extension (Phase 3).
+- web/        Kody client SDK. The extension imports it. There is NO React app and none is
+              to be built: Kody is a browser extension. The SDK stays so a web client
+              remains possible later, and so the API has one client contract, not two.
+- extension/  Chrome MV3 extension. This IS the product (Phase 1.4). Packaging and the
+              Web Store listing are Phase 3.
 - prototypes/ v10 app, v11 sign-in, v12 admin. The visual source of truth.
 - docs/       Per-area design docs (02-15), PHASES.md, DAI_CHANGES.md.
 - The admin console does NOT live here. It lives in dAdmin (separate repo, dAI section).
@@ -42,9 +45,14 @@ with Ask Kody (codes, knowledge, AI), team chat, files, search and notifications
     npm test                        # needs MySQL 8 and Redis (TEST_REDIS_URL or 127.0.0.1:6379)
     npm run dev                     # API on :4014, /health and /health/ready
 
-## Conventions borrowed from dAdmin (for the Phase 1 React app in web/)
-- Create React App (react-scripts), react-router-dom, Bootstrap, Font Awesome, like dAdmin.
-- Page files are PascalCase-with-underscores `Page_Name.js` + `Page_Name.css`, as in dAdmin.
+## Conventions for the extension (Phase 1.4)
+- Kody is a browser extension. Do not build a React app, and do not add a bundler: the
+  extension is plain ES modules that Chrome loads directly, so what you review is what
+  ships (docs/14-extension.md).
 - API calls go through the Kody SDK in web/src/api (bearer tokens, single-flight refresh,
-  rule 12). Do not copy dAdmin's cookie auth into this app.
+  rule 12). Do not write a second HTTP client inside the extension.
+- A token never reaches the content script (rule 22). The bubble is a button and a status
+  dot; answers render in the side panel, which runs in the extension's own origin.
+- No inline script and no remote script anywhere: the CSP forbids both, and
+  `node extension/build.js` fails the build if either appears.
 - Keep the look of prototypes/kody_prototype_v10.jsx and kody_auth_flow_v11.jsx exactly.

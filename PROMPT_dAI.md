@@ -38,11 +38,13 @@ emp_mail_id, account_pass (bcryptjs hash), emp_first_name, emp_last_name, emp_ac
 dAdmin branch; until then, create it in your local dadmin copy with DEFAULT 0).
 Read-only: the dAI database user gets SELECT on dadmin.employee and nothing else in dadmin.
 
-For 1.4, the React app goes in web/: Create React App, react-router-dom, Bootstrap and
-Font Awesome, the same stack as dAdmin. Keep the existing web/src/api, web/src/realtime and
-web/src/screens files and use them for every API call. Copy the look of
-prototypes/kody_prototype_v10.jsx and prototypes/kody_auth_flow_v11.jsx exactly;
-do not redesign anything.
+For 1.4, Kody is a browser extension and there is NO React app. Do not build one, and do not
+add a bundler: the extension is plain ES modules Chrome loads directly. The work is the
+extension itself (popup, side panel, bubble, icons) plus the small sign-in page on the dAI
+host that hands the login back to it. Keep web/src/api, web/src/realtime and web/src/screens
+and use them for every API call, so the SDK stays the one client contract and a web client
+remains possible later. Copy the look of prototypes/kody_prototype_v10.jsx and
+prototypes/kody_auth_flow_v11.jsx exactly; do not redesign anything.
 
 Ask me before: adding a dependency not already used, changing a migration, touching auth token
 logic, or anything that affects dAdmin. Never use an em dash or en dash anywhere.
