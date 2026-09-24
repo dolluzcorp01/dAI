@@ -311,6 +311,77 @@ async function removeDefaultLink(userId, id, ctx = {}) {
   return listDefaultLinks();
 }
 
+/* ---------------- dismissing an unanswered question ---------------- */
+
+/**
+ * dAI: the unanswered panel is an aggregate, so a row has no id. It carries a
+ * questionKey instead, and that is what is dismissed here.
+ *
+ * Nothing stores the question text: the key is a hash, and a question an
+ * associate typed can carry claim detail. Dismissing is reversible, and both
+ * directions are audited, because "who decided we would not answer this" is a
+ * question someone will ask later.
+ */
+const KEY_SHAPE = /^[0-9a-f]{64}$/;
+
+function questionKey(key) {
+  const clean = String(key || "").trim().toLowerCase();
+  if (!KEY_SHAPE.test(clean)) {
+    throw new V.ValidationError("questionKey must be the 64 character key the panel returned.", "questionKey");
+  }
+  return clean;
+}
+
+async function dismissUnanswered(userId, { key, domain, note } = {}, ctx = {}) {
+  const clean = questionKey(key);
+  const why = note ? V.str(note, "note", { max: 200, allowNull: true }) : null;
+  const scope = domain ? V.str(domain, "domain", { max: 16, allowNull: true }) : null;
+
+  await db.query(
+    `INSERT INTO unanswered_dismissals (question_key, domain, note, dismissed_by)
+     VALUES (?,?,?,?)
+     ON DUPLICATE KEY UPDATE note = VALUES(note), dismissed_by = VALUES(dismissed_by),
+                             dismissed_at = CURRENT_TIMESTAMP`,
+    [clean, scope, why, userId]
+  );
+  await audit(null, {
+    actorId: userId, action: "analytics.unanswered_dismissed", entityType: "unanswered",
+    entityId: null, ip: ctx.ip, userAgent: ctx.userAgent,
+    meta: { questionKey: clean, domain: scope, note: why },
+  });
+  analytics.clearCache();     // the overview carries this panel
+  return { dismissed: true, questionKey: clean };
+}
+
+async function restoreUnanswered(userId, key, ctx = {}) {
+  const clean = questionKey(key);
+  const [res] = await db.query(
+    `DELETE FROM unanswered_dismissals WHERE question_key = ?`, [clean]
+  );
+  if (res.affectedRows === 0) {
+    throw new AdminError(404, "not_dismissed", "That question is not dismissed.");
+  }
+  await audit(null, {
+    actorId: userId, action: "analytics.unanswered_restored", entityType: "unanswered",
+    entityId: null, ip: ctx.ip, userAgent: ctx.userAgent, meta: { questionKey: clean },
+  });
+  analytics.clearCache();
+  return { restored: true, questionKey: clean };
+}
+
+/** What is currently hidden, and who hid it. No question text: there is none stored. */
+async function listDismissedUnanswered({ limit = 100 } = {}) {
+  const lim = Math.min(Math.max(Number(limit) || 100, 1), 500);
+  const [rows] = await db.query(
+    `SELECT d.question_key AS questionKey, d.domain, d.note,
+            d.dismissed_at AS dismissedAt, u.full_name AS dismissedBy
+       FROM unanswered_dismissals d LEFT JOIN users u ON u.id = d.dismissed_by
+      ORDER BY d.dismissed_at DESC LIMIT ?`,
+    [lim]
+  );
+  return rows;
+}
+
 /* ---------------- audit log ---------------- */
 
 async function auditLog({ action, actorId, from, to, limit = 100, offset = 0 } = {}) {
@@ -359,4 +430,5 @@ module.exports = {
   listVersions, publishVersion,
   listDefaultLinks, addDefaultLink, removeDefaultLink,
   auditLog, auditActions,
+  dismissUnanswered, restoreUnanswered, listDismissedUnanswered,   // dAI
 };

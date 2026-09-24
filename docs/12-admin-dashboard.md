@@ -211,6 +211,22 @@ Three more that are easy to read wrong:
 show the same sentence the API means. A test fails if a headline field is added
 without a definition.
 
+## Dismissing an unanswered question
+
+dAI: the panel is an aggregate, so a row has no id. Every row carries a
+`questionKey`, the SHA-256 of the normalised question and its domain, computed
+in SQL so there is exactly one definition of "the same question".
+
+| Call | What it does |
+|---|---|
+| `POST /api/admin/analytics/unanswered/dismiss` | Body `{ questionKey, domain?, note? }`. Hides the row. Repeating it updates the note rather than failing. |
+| `DELETE /api/admin/analytics/unanswered/dismiss/:key` | Puts it back. 404 when it was never dismissed. |
+| `GET /api/admin/analytics/unanswered/dismissed` | What is hidden, who hid it, when, and why. |
+
+All three are admin only, and both directions are written to `audit_log`. The
+store keeps the hash, the domain, a note and who: never the question text, so a
+dismissal cannot be read back into a question.
+
 ## A note on the analytics
 
 Every number on the overview is derivable from tables that already exist:

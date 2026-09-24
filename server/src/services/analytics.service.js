@@ -202,13 +202,34 @@ async function byModel() {
 }
 
 /**
+ * dAI: the key a dismissal is stored under.
+ *
+ * Defined once, here, in SQL, and used both to label a row and to exclude a
+ * dismissed one. Normalising in JavaScript as well would be two definitions of
+ * "the same question" that drift apart, so the API never takes a question to
+ * dismiss: it takes the key it handed out.
+ *
+ * Normalisation: lower case, trimmed, runs of whitespace collapsed, trailing
+ * question and full stop marks removed, then joined to the domain.
+ */
+const QUESTION_KEY_SQL = `
+  SHA2(CONCAT(
+    REGEXP_REPLACE(REGEXP_REPLACE(LOWER(TRIM(q.body)), '[[:space:]]+', ' '), '[?!.]+$', ''),
+    '|', COALESCE(a.domain, '')
+  ), 256)`;
+
+/**
  * The panel that matters: asked repeatedly, answered with low confidence, and
  * no document backed it. This is the queue that says what to write next.
+ *
+ * dAI: rows an admin has dismissed are excluded, in the query rather than
+ * afterwards, so the limit still returns a full page.
  */
 async function unanswered({ limit = 10 } = {}) {
   const lim = Math.min(Math.max(Number(limit) || 10, 1), 50);
   const [rows] = await db.query(
-    `SELECT q.body AS question, a.domain,
+    `SELECT ${QUESTION_KEY_SQL} AS questionKey,
+            q.body AS question, a.domain,
             COUNT(*) AS asked,
             SUM(CASE WHEN a.confidence = 'low' THEN 1 ELSE 0 END) AS lowConfidence,
             SUM(CASE WHEN a.used_retrieval = 0 THEN 1 ELSE 0 END) AS withoutDocument
@@ -220,6 +241,10 @@ async function unanswered({ limit = 10 } = {}) {
         AND (a.confidence = 'low' OR a.used_retrieval = 0)
         AND q.id = (SELECT MAX(q2.id) FROM kody_messages q2
                      WHERE q2.thread_id = a.thread_id AND q2.role = 'user' AND q2.id < a.id)
+        AND NOT EXISTS (
+              SELECT 1 FROM unanswered_dismissals d
+               WHERE d.question_key = ${QUESTION_KEY_SQL}
+            )
       GROUP BY q.body, a.domain
       HAVING asked >= 1
       ORDER BY asked DESC, lowConfidence DESC
@@ -227,6 +252,7 @@ async function unanswered({ limit = 10 } = {}) {
     [lim]
   );
   return rows.map(r => ({
+    questionKey: r.questionKey,     // dAI: what a dismissal is keyed on
     question: r.question, domain: r.domain,
     asked: Number(r.asked), lowConfidence: Number(r.lowConfidence),
     withoutDocument: Number(r.withoutDocument),

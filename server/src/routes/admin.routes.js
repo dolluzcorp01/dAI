@@ -86,6 +86,22 @@ router.get("/analytics/unanswered", wrap(async (req, res) => {
   res.json({ unanswered: await analytics.unanswered({ limit: req.query.limit }) });
 }));
 
+/* dAI: dismissing a row from the unanswered panel, and putting it back.
+   Writes, so admin only: they are not in the sub_admin allowlist above. */
+router.post("/analytics/unanswered/dismiss", wrap(async (req, res) => {
+  const { questionKey, key, domain, note } = req.body || {};
+  res.json(await admin.dismissUnanswered(req.auth.userId,
+    { key: questionKey || key, domain, note }, ctxOf(req)));
+}));
+
+router.delete("/analytics/unanswered/dismiss/:key", wrap(async (req, res) => {
+  res.json(await admin.restoreUnanswered(req.auth.userId, req.params.key, ctxOf(req)));
+}));
+
+router.get("/analytics/unanswered/dismissed", wrap(async (req, res) => {
+  res.json({ dismissed: await admin.listDismissedUnanswered({ limit: req.query.limit }) });
+}));
+
 router.get("/analytics/people", wrap(async (req, res) => {
   res.json({ people: await analytics.byPerson({ from: req.query.from, to: req.query.to }) });
 }));
