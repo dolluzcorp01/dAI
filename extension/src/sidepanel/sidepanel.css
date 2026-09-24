@@ -1,6 +1,6 @@
 /* The side panel, from prototypes/kody_prototype_v10.jsx: the same ink, gold,
-   hairline and chip treatment as the panel in the prototype. The tabs, the
-   recent codes strip and the points wallet arrive in 1.4c. */
+   hairline and chip treatment as the panel in the prototype, including the
+   tabs, the recent codes strip and the points wallet. */
 
 :root {
   --ink: #101828;
@@ -93,8 +93,18 @@ body {
 
 /* ---------------- thread ---------------- */
 
+.pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.pane-ask { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+
 .thread {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px;
   display: flex;
@@ -102,7 +112,9 @@ body {
   gap: 10px;
 }
 
+.pane::-webkit-scrollbar,
 .thread::-webkit-scrollbar { width: 6px; }
+.pane::-webkit-scrollbar-thumb,
 .thread::-webkit-scrollbar-thumb { background: #d6dae1; border-radius: 3px; }
 
 .empty { padding: 34px 18px; text-align: center; }
@@ -251,5 +263,195 @@ button { font-family: inherit; cursor: pointer; }
 
 button:focus-visible,
 textarea:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+
+/* ---------------- points wallet ---------------- */
+
+.points {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: 1px solid rgba(199, 154, 24, 0.27);
+  border-radius: 20px;
+  background: var(--gold-soft);
+  color: var(--gold-deep);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.points-value { font-variant-numeric: tabular-nums; }
+.points-label { font-size: 10px; font-weight: 500; }
+
+/* ---------------- tabs ---------------- */
+
+.tabs {
+  display: flex;
+  background: #fff;
+  border-bottom: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+
+.tab {
+  flex: 1;
+  padding: 9px 0;
+  border: none;
+  background: transparent;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.tab.on {
+  font-weight: 600;
+  color: var(--gold);
+  box-shadow: inset 0 -2px 0 var(--gold);
+}
+
+/* ---------------- lookup, the tier 0 answer ---------------- */
+
+.lookup {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-bottom: 9px;
+  padding: 8px 10px;
+  border: 1px solid rgba(199, 154, 24, 0.27);
+  border-radius: 9px;
+  background: var(--gold-soft);
+}
+
+.lookup-code {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gold-deep);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  flex-shrink: 0;
+}
+
+.lookup-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.lookup-desc { font-size: 12.5px; line-height: 1.4; }
+.lookup-set { font-size: 10.5px; color: var(--muted); }
+
+.answer-text { margin: 0; white-space: pre-wrap; }
+
+.degraded {
+  margin-bottom: 8px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: #fffaeb;
+  color: var(--amber);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.cites { margin-top: 8px; font-size: 11px; color: var(--muted); }
+
+/* ---------------- answer actions ---------------- */
+
+.actions-wrap { margin-top: 10px; }
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 9px;
+  border-top: 1px solid var(--hairline);
+}
+
+.action {
+  padding: 4px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 20px;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.action:hover { background: #f9fafb; }
+
+.action.on {
+  border-color: rgba(199, 154, 24, 0.4);
+  background: var(--gold-soft);
+  color: var(--gold-deep);
+}
+
+.action:disabled { cursor: default; opacity: 0.6; }
+
+.verdict {
+  display: block;
+  margin-top: 7px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* ---------------- recent codes strip ---------------- */
+
+.codes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  background: #fff;
+  border-top: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+
+.codes-label { width: 100%; font-size: 11px; color: var(--muted); }
+
+.code-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 20px;
+  background: #fff;
+  font-size: 11.5px;
+}
+
+.code-chip:hover { background: var(--gold-soft); }
+.code-chip .code { font-weight: 650; color: var(--gold-deep); font-variant-numeric: tabular-nums; }
+.code-chip .set { font-size: 10.5px; color: var(--muted); }
+
+/* ---------------- saved, history, chats ---------------- */
+
+.hint {
+  margin: 0;
+  padding: 30px 18px;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.history-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  margin-bottom: 7px;
+  padding: 9px 11px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+}
+
+.history-row:hover { border-color: var(--gold); }
+.history-title { font-size: 12.5px; font-weight: 600; line-height: 1.4; }
+.history-when { font-size: 11px; color: var(--muted); text-transform: capitalize; }
+
+#panel-saved .a { margin-bottom: 10px; }
+
+.soon { padding: 34px 18px; text-align: center; }
+.soon-title { margin: 0 0 6px; font-size: 13.5px; font-weight: 650; }
+.soon-body { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--muted); }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

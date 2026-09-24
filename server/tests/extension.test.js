@@ -36,7 +36,7 @@ const readExt = (rel) => fs.readFileSync(path.join(EXT, rel), "utf8");
 const manifest = JSON.parse(readExt("manifest.json"));
 
 const PASSWORD = "Kody!Dev2026";
-let server, base, auth;
+let server, base, auth, config;
 
 /** A chrome.storage.local that behaves like the real one. */
 function fakeStorage() {
@@ -62,6 +62,7 @@ before(async () => {
   if (!global.crypto) global.crypto = require("node:crypto").webcrypto;
 
   auth = await import(`file://${path.join(EXT, "src", "shared", "auth.js")}`);
+  config = await import(`file://${path.join(EXT, "src", "shared", "config.js")}`);
 
   server = createApp().listen(0);
   await new Promise(r => server.once("listening", r));
@@ -230,13 +231,139 @@ describe("static safety", () => {
   });
 
   test("the panel only follows http and https links", () => {
-    assert.match(files.panel, /protocol === "http:" \|\| u\.protocol === "https:"/);
+    assert.match(files.panel, /protocol === "http:"/);
+    assert.match(files.panel, /protocol === "https:"/);
     assert.match(files.panel, /noreferrer noopener/);
   });
 
   test("state is generated with crypto, not Math.random", () => {
     assert.match(files.auth, /crypto\.getRandomValues/);
     assert.ok(!/Math\.random/.test(files.auth), "a CSRF guard must not be predictable");
+  });
+});
+
+/* ---------------- dAI: 1.4c, the side panel and where it points ---------------- */
+
+describe("where the extension talks to", () => {
+  test("defaults to production when nothing is configured", async () => {
+    const where = await config.endpoints(fakeStorage());
+    assert.equal(where.apiBase, "https://dai.dolluzcorp.com");
+    assert.equal(where.siteBase, "https://dai.dolluzcorp.com");
+    assert.equal(where.isProduction, true);
+  });
+
+  test("falls back to production when storage itself fails", async () => {
+    const broken = { async get() { throw new Error("no storage"); } };
+    const where = await config.endpoints(broken);
+    assert.equal(where.isProduction, true);
+  });
+
+  test("accepts a local server and reports it is not production", async () => {
+    const storage = fakeStorage();
+    const set = await config.setEndpoints(
+      { apiBase: "http://localhost:4014/", siteBase: "http://127.0.0.1:3000" }, storage);
+    assert.equal(set.ok, true);
+    assert.equal(set.apiBase, "http://localhost:4014", "the trailing slash is trimmed");
+
+    const where = await config.endpoints(storage);
+    assert.equal(where.apiBase, "http://localhost:4014");
+    assert.equal(where.siteBase, "http://127.0.0.1:3000");
+    assert.equal(where.isProduction, false);
+  });
+
+  test("refuses plain http to anywhere but this machine", async () => {
+    const storage = fakeStorage();
+    for (const bad of ["http://dai.dolluzcorp.com", "http://192.168.1.9:4014",
+                       "http://localhost.evil.com", "ftp://localhost:4014",
+                       "javascript:alert(1)", "not a url", ""]) {
+      const out = await config.setEndpoints({ apiBase: bad, siteBase: bad }, storage);
+      assert.equal(out.ok, false, `${bad} was accepted`);
+      assert.equal(storage._data.size, 0, `${bad} was written to storage`);
+    }
+    assert.equal(config.cleanBase("https://dai.example.com/api/"), "https://dai.example.com");
+  });
+
+  test("both bases are required together, so sign-in cannot point one way and the API another", async () => {
+    const storage = fakeStorage();
+    const out = await config.setEndpoints(
+      { apiBase: "http://localhost:4014", siteBase: "" }, storage);
+    assert.equal(out.ok, false);
+    assert.equal(storage._data.size, 0);
+  });
+
+  test("clearing puts it back to production", async () => {
+    const storage = fakeStorage();
+    await config.setEndpoints(
+      { apiBase: "http://localhost:4014", siteBase: "http://localhost:3000" }, storage);
+    await config.clearEndpoints(storage);
+    assert.equal((await config.endpoints(storage)).isProduction, true);
+  });
+
+  test("the manifest asks for localhost optionally, never as a granted host", () => {
+    assert.deepEqual(manifest.optional_host_permissions,
+      ["http://localhost/*", "http://127.0.0.1/*"]);
+    for (const host of manifest.host_permissions) {
+      assert.ok(host.startsWith("https://"), `${host} is not https`);
+      assert.ok(!/localhost|127\.0\.0\.1/.test(host),
+        "a shipped build must not hold a local host permission");
+    }
+  });
+});
+
+describe("the side panel", () => {
+  const panelSrc = readExt("src/sidepanel/sidepanel.js");
+  const panelHtml = readExt("src/sidepanel/index.html");
+  const workerSrc = readExt("src/background/service-worker.js");
+
+  test("has the four tabs of the prototype, and Chats says it is Phase 2", () => {
+    for (const id of ["tab-ask", "tab-chats", "tab-saved", "tab-history"]) {
+      assert.ok(panelHtml.includes(`id="${id}"`), `${id} is missing`);
+      assert.ok(panelSrc.includes(id.replace("tab-", "")), `${id} is not wired up`);
+    }
+    assert.match(panelHtml, /Coming in Phase 2/);
+  });
+
+  test("draws the recent codes strip, the points wallet and the feedback buttons", () => {
+    assert.match(panelHtml, /id="codes"/);
+    assert.match(panelHtml, /id="points"/);
+    assert.match(panelSrc, /kody:feedback/);
+    assert.match(panelSrc, /kody:points/);
+    assert.match(panelSrc, /"Helpful"/);
+    assert.match(panelSrc, /"Not helpful"/);
+  });
+
+  test("never holds a token and never calls the API itself", () => {
+    assert.ok(!/kody_access|kody_refresh|accessToken|refreshToken/.test(panelSrc),
+      "the panel asks the worker; only the worker holds tokens");
+    assert.ok(!/fetch\s*\(/.test(panelSrc), "every call goes through the worker");
+    assert.ok(!/shared\/(api|auth|sdk)/.test(panelSrc),
+      "the panel does not import the API client");
+  });
+
+  test("the worker answers every message the panel sends", () => {
+    const sent = new Set([...panelSrc.matchAll(/type:\s*"(kody:[a-z-]+)"/g)].map(m => m[1]));
+    assert.ok(sent.size >= 6, `the panel sends only ${sent.size} kinds of message`);
+    for (const type of sent) {
+      assert.ok(workerSrc.includes(`case "${type}"`), `the worker has no case for ${type}`);
+    }
+  });
+
+  test("every API call in the worker refuses when nobody is signed in", () => {
+    for (const type of ["kody:ask", "kody:threads", "kody:thread", "kody:feedback", "kody:points"]) {
+      const at = workerSrc.indexOf(`case "${type}"`);
+      assert.ok(at > 0, `${type} is missing`);
+      assert.match(workerSrc.slice(at, at + 260), /isSignedIn\(\)/,
+        `${type} does not check the session`);
+    }
+  });
+
+  test("the vendored SDK is byte for byte the SDK in web/src/api", () => {
+    for (const name of ["client.js", "adapters.js", "endpoints.js"]) {
+      const shipped = fs.readFileSync(path.join(EXT, "src", "shared", "sdk", name));
+      const source = fs.readFileSync(path.join(EXT, "..", "web", "src", "api", name));
+      assert.ok(shipped.equals(source),
+        `src/shared/sdk/${name} has drifted. Run: node extension/build.js --sync`);
+    }
   });
 });
 

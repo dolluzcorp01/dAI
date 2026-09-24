@@ -71,3 +71,17 @@ Every one is marked `// dAI:` in the code where it touches a module file.
   into a published document, an @mention produced a notification with no message text in it,
   /health/ready returned 200.
 - NOT verified: any real Claude or OpenAI call, SendGrid, Spaces, ClamAV, the extension in a browser.
+
+## 1.4c - the side panel, and which server it talks to (2026-09-24)
+
+| File | Change | Why |
+|---|---|---|
+| `extension/src/shared/config.js` | new | API_BASE and SITE_BASE were constants in the source. They are now production by default with an override in `chrome.storage.local`, so a local server can be used for development without an edit that someone forgets to undo. https anywhere, http only on this machine. |
+| `extension/src/shared/api.js` | new | One place where the extension builds the SDK client. Only the service worker uses it, so tokens and the single refresh stay in one context. |
+| `extension/src/shared/sdk/*.js` | new, vendored | Chrome can only load files inside the extension, so `web/src/api` is copied in rather than imported. |
+| `extension/build.js` | `// dAI:` SDK drift check and `--sync` | A vendored copy that silently drifts would become a second client contract. The build now fails instead. |
+| `extension/src/background/service-worker.js` | `// dAI:` uses the SDK; new cases `kody:ask`, `kody:threads`, `kody:thread`, `kody:feedback`, `kody:points`, `kody:endpoints`, `kody:set-endpoints`; the trusted external origin comes from config | The panel renders and the worker calls. Each new API case refuses when nobody is signed in. |
+| `extension/src/sidepanel/{index.html,sidepanel.css,sidepanel.js}` | rewritten to prototype v10 | The panel was a stub from 1.4b. It is now Ask, Chats, Saved and History with the answer card, the recent codes strip, the points wallet and the feedback buttons. Built with textContent only. |
+| `extension/src/popup/{index.html,popup.css,popup.js}` | `// dAI:` Server section | Where a developer points the extension at their own machine, including asking Chrome for the localhost host permission at the click. |
+| `extension/manifest.json` | `optional_host_permissions` for localhost and 127.0.0.1 | Chrome refuses a host the manifest never asked for, and a packed build must not hold a local host permission it was granted. |
+| `web/src/api/endpoints.js` | `// dAI:` added `notifications` | The badge and the bell had no endpoint wrapper. The list carries no message text unless the organisation opted in (rule 17). |

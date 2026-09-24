@@ -111,8 +111,61 @@ $("open-panel").addEventListener("click", async () => {
   }
 });
 
+/* ---------------- dAI: which server (development) ---------------- */
+
+function note(text) {
+  const box = $("dev-note");
+  box.textContent = text;
+  box.hidden = !text;
+}
+
+async function paintWhere() {
+  const where = await send({ type: "kody:endpoints" });
+  if (!where.ok) return;
+  $("where").textContent = where.isProduction
+    ? "Production. Dolluz."
+    : `Development. ${where.apiBase}`;
+  $("api-base").value = where.isProduction ? "" : where.apiBase;
+  $("site-base").value = where.isProduction ? "" : where.siteBase;
+}
+
+$("dev-use").addEventListener("click", async () => {
+  note("");
+  const apiBase = $("api-base").value.trim();
+  const siteBase = $("site-base").value.trim();
+
+  // Chrome will not let the worker call a host the manifest did not ask for, and
+  // localhost is optional so a packed build never holds it. Ask at the moment
+  // it is needed, from this click, which is the user gesture Chrome requires.
+  try {
+    const origins = [apiBase, siteBase]
+      .map(b => { try { return `${new URL(b).origin}/*`; } catch (_) { return null; } })
+      .filter(o => o && o.startsWith("http://"));
+    if (origins.length > 0) {
+      const granted = await chrome.permissions.request({ origins: [...new Set(origins)] });
+      if (!granted) { note("Chrome did not grant access to that server."); return; }
+    }
+  } catch (err) {
+    note("Could not ask Chrome for access to that server.");
+    return;
+  }
+
+  const out = await send({ type: "kody:set-endpoints", apiBase, siteBase });
+  if (out.ok === false) { note(out.message || "Could not use that server."); return; }
+  await paintWhere();
+  note("Now talking to that server. Sign in again.");
+});
+
+$("dev-reset").addEventListener("click", async () => {
+  note("");
+  await send({ type: "kody:set-endpoints", reset: true });
+  await paintWhere();
+  note("Back to production. Sign in again.");
+});
+
 chrome.runtime.onMessage.addListener((message) => {
   if (message && (message.type === "kody:signed-out" || message.type === "kody:signed-in")) paint();
 });
 
 paint();
+paintWhere();

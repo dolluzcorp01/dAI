@@ -14,8 +14,12 @@
  * read a variable, so it never receives one. It asks the worker instead.
  */
 import {
-  beginSignIn, completeSignIn, clearTokens, getTokens, isSignedIn, apiFetch, SITE_BASE,
+  beginSignIn, completeSignIn, clearTokens, getTokens, isSignedIn,
 } from "../shared/auth.js";
+// dAI: every API call goes through the SDK (docs/PHASES.md 1.4c), and every one
+// of them happens here, so token refresh has exactly one home.
+import { kodyApi, resetApi } from "../shared/api.js";
+import { endpoints, setEndpoints, clearEndpoints } from "../shared/config.js";
 
 const SIDE_PANEL_PATH = "src/sidepanel/index.html";
 
@@ -52,6 +56,7 @@ async function signIn() {
     ? chrome.identity.getRedirectURL("kody")
     : `https://${chrome.runtime.id}.chromiumapp.org/kody`;
 
+  resetApi();                      // dAI: endpoints may have changed since the last call
   const { url } = await beginSignIn({ redirectUri });
 
   // launchWebAuthFlow gives us the redirect without leaving a tab behind.
@@ -78,33 +83,33 @@ async function signIn() {
  */
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   const origin = sender.origin || (sender.url ? new URL(sender.url).origin : "");
-  if (origin !== SITE_BASE) {
-    sendResponse({ ok: false, error: "untrusted_origin" });
-    return false;
-  }
-  if (!message || message.type !== "kody:auth-code") {
-    sendResponse({ ok: false, error: "unknown_message" });
-    return false;
-  }
-  const fake = `https://handoff/?code=${encodeURIComponent(message.code)}&state=${encodeURIComponent(message.state)}`;
-  completeSignIn(fake).then(async (out) => {
+  // dAI: the trusted origin is the configured site, which is production unless
+  // a developer pointed it at their own machine. Still exactly one origin.
+  (async () => {
+    const { siteBase: SITE_BASE } = await endpoints();
+    if (origin !== SITE_BASE) {
+      sendResponse({ ok: false, error: "untrusted_origin" });
+      return;
+    }
+    if (!message || message.type !== "kody:auth-code") {
+      sendResponse({ ok: false, error: "unknown_message" });
+      return;
+    }
+    const fake = `https://handoff/?code=${encodeURIComponent(message.code)}&state=${encodeURIComponent(message.state)}`;
+    const out = await completeSignIn(fake);
     await updateBadge();
     sendResponse(out);
-  });
+  })();
   return true;   // async
 });
 
 async function signOut() {
-  const { refreshToken } = await getTokens();
-  if (refreshToken) {
-    try {
-      await apiFetch("/api/auth/logout", {
-        method: "POST",
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-    } catch (_) { /* sign out locally regardless */ }
-  }
+  try {
+    const api = await kodyApi();
+    await api.auth.logout();      // dAI: revokes the session server side, then clears storage
+  } catch (_) { /* sign out locally regardless */ }
   await clearTokens();
+  resetApi();
   await updateBadge();
   broadcast({ type: "kody:signed-out" });
   return { ok: true };
@@ -120,10 +125,8 @@ async function updateBadge() {
     return;
   }
   try {
-    const res = await apiFetch("/api/notifications?unreadOnly=true&limit=1");
-    if (!res.ok) throw new Error("unavailable");
-    const body = await res.json();
-    const n = Number(body.unread || 0);
+    const api = await kodyApi();
+    const n = await api.notifications.unreadCount();
     await chrome.action.setBadgeText({ text: n > 0 ? (n > 99 ? "99+" : String(n)) : "" });
     await chrome.action.setBadgeBackgroundColor({ color: "#C79A18" });
     await chrome.action.setTitle({ title: n > 0 ? `Kody - ${n} unread` : "Kody" });
@@ -190,14 +193,59 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: true });
         return;
 
+      /* dAI: everything the side panel needs. The panel renders; it never holds
+         a token and never calls the API itself (docs/PHASES.md 1.4c). */
       case "kody:ask": {
         if (!(await isSignedIn())) { sendResponse({ ok: false, error: "not_signed_in" }); return; }
-        const res = await apiFetch("/api/kody/ask", {
-          method: "POST",
-          body: JSON.stringify({ question: message.question, threadId: message.threadId }),
-        });
-        const body = await res.json().catch(() => null);
-        sendResponse(res.ok ? { ok: true, ...body } : { ok: false, ...(body || { error: "ask_failed" }) });
+        const api = await kodyApi();
+        const out = await api.kody.ask(message.question, message.threadId || null);
+        sendResponse({ ok: true, ...out });
+        return;
+      }
+
+      case "kody:threads": {
+        if (!(await isSignedIn())) { sendResponse({ ok: false, error: "not_signed_in" }); return; }
+        const api = await kodyApi();
+        sendResponse({ ok: true, threads: await api.kody.threads() });
+        return;
+      }
+
+      case "kody:thread": {
+        if (!(await isSignedIn())) { sendResponse({ ok: false, error: "not_signed_in" }); return; }
+        const api = await kodyApi();
+        sendResponse({ ok: true, ...(await api.kody.thread(message.threadId)) });
+        return;
+      }
+
+      case "kody:feedback": {
+        if (!(await isSignedIn())) { sendResponse({ ok: false, error: "not_signed_in" }); return; }
+        const api = await kodyApi();
+        const out = await api.kody.feedback(message.messageId, message.vote, message.comment);
+        await updateBadge();
+        sendResponse({ ok: true, ...out });
+        return;
+      }
+
+      case "kody:points": {
+        if (!(await isSignedIn())) { sendResponse({ ok: false, error: "not_signed_in" }); return; }
+        const api = await kodyApi();
+        sendResponse({ ok: true, points: await api.kody.points() });
+        return;
+      }
+
+      case "kody:endpoints": {
+        sendResponse({ ok: true, ...(await endpoints()) });
+        return;
+      }
+
+      case "kody:set-endpoints": {
+        // Development convenience. Production is the default and the fallback,
+        // and config.js refuses anything but https or http on this machine.
+        const out = message.reset
+          ? await clearEndpoints()
+          : await setEndpoints({ apiBase: message.apiBase, siteBase: message.siteBase });
+        resetApi();
+        sendResponse(out.ok === false ? out : { ok: true, ...(await endpoints()) });
         return;
       }
 

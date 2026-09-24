@@ -39,6 +39,31 @@ manifest.content_scripts.forEach(cs => {
 });
 (manifest.web_accessible_resources || []).forEach(w => w.resources.forEach(need));
 
+/* The SDK is the one client contract, so the copy the extension ships must be
+   the copy web/src/api holds. Chrome can only load files inside the extension,
+   hence a vendored copy rather than an import across the repo. --sync rewrites
+   it; without that, a drifted copy fails the build. */
+const SDK_FILES = ["client.js", "adapters.js", "endpoints.js"];
+const sdkSource = (name) => path.join(ROOT, "..", "web", "src", "api", name);
+const sdkVendored = (name) => path.join(ROOT, "src", "shared", "sdk", name);
+
+if (process.argv.includes("--sync")) {
+  fs.mkdirSync(path.join(ROOT, "src", "shared", "sdk"), { recursive: true });
+  for (const name of SDK_FILES) fs.copyFileSync(sdkSource(name), sdkVendored(name));
+  console.log(`  synced ${SDK_FILES.length} SDK files from web/src/api`);
+}
+
+for (const name of SDK_FILES) {
+  if (!fs.existsSync(sdkVendored(name))) {
+    problems.push(`src/shared/sdk/${name} is missing. Run: node extension/build.js --sync`);
+    continue;
+  }
+  const same = fs.readFileSync(sdkSource(name)).equals(fs.readFileSync(sdkVendored(name)));
+  if (!same) {
+    problems.push(`src/shared/sdk/${name} differs from web/src/api/${name}. Run: node extension/build.js --sync`);
+  }
+}
+
 /* nothing in the shipped tree may load remote code */
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
   const full = path.join(dir, e.name);

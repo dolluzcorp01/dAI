@@ -16,6 +16,9 @@ extension/
   build.js                     check and package, no bundler
   icons/                       16, 32, 48, 128, generated from the Dolluz mark
   src/shared/auth.js           token storage, handoff, refresh
+  src/shared/config.js         which server, production by default
+  src/shared/api.js            the SDK client, built for the worker only
+  src/shared/sdk/              vendored copy of web/src/api, checked by build.js
   src/background/service-worker.js
   src/content/bubble.js        the floating bubble
   src/content/bubble.css
@@ -108,6 +111,7 @@ terminal failure just loops.
 | `notifications` | mention alerts |
 | `identity` | **optional**, requested only when signing in |
 | host: `https://dai.dolluzcorp.com/*` | our own API, nothing else |
+| host: `http://localhost/*`, `http://127.0.0.1/*` | **optional**, development only, requested from the popup when a developer points the extension at their own machine |
 
 Not asked for: `<all_urls>`, `tabs`, `webRequest`, `cookies`, `management`.
 The content script matches all http and https pages because the bubble has to
@@ -124,10 +128,14 @@ review risk.
 | Manifest | MV3, no MV2 keys, every named file exists, icons are real PNGs at the declared sizes, narrow permissions, content script excludes identity providers, CSP forbids remote and inline script, shortcuts declared |
 | Static safety | no eval or `new Function`, no remote script, no `innerHTML` in the panel or bubble, no inline script or handlers in the HTML, content script never touches a token, worker refuses a token to a tab, external messages only from the Dolluz origin, links restricted to http and https, state from `crypto` |
 | Handoff | distinct state every time, state stored and URL built, real code exchanged for real tokens, no token in the redirect, code not reusable, unlisted extension refused, state mismatch refused without a network call, expired state refused, refusal surfaced |
+| Where it points | production with nothing configured, production when storage itself fails, a local server accepted and reported as not production, plain http refused for every host but this machine, both bases required together, clearing returns to production, the manifest holds localhost only as an optional host |
+| Side panel | the four tabs of the prototype with Chats marked Phase 2, the codes strip, the points wallet and the feedback buttons present, the panel holds no token and never calls `fetch`, every message it sends has a case in the worker, every API case in the worker checks the session, the vendored SDK is byte for byte web/src/api |
 | Refresh | rotates and stores the pair, ten concurrent refreshes make one call and the session survives, a revoked token clears storage, `apiFetch` recovers from a corrupt access token |
 
-Two mutations were run: accepting any `chromiumapp.org` host, and skipping the
-state check. Both were caught.
+Five mutations were run: accepting any `chromiumapp.org` host, skipping the
+state check, drifting the vendored SDK, letting plain http point anywhere, and
+dropping the session check from `kody:points`. All five were caught, and each
+file was restored byte for byte.
 
 ---
 
@@ -140,6 +148,9 @@ against the real server with a fake `chrome.storage`.
 What that leaves unproven:
 
 - Whether the bubble renders correctly, or at all, on a real page.
+- Whether the side panel looks like the prototype. Its HTML and CSS have never
+  been rendered. Ask, Saved, History, the codes strip and the wallet are wired
+  to the worker and statically checked, and nothing more than that.
 - Whether it survives sites with aggressive CSS, `position: static !important`
   rules, or their own shadow DOM.
 - Whether `chrome.sidePanel.open` succeeds from each entry point. It requires a
@@ -153,6 +164,44 @@ What that leaves unproven:
 
 The first hour with Chrome will find things. That is expected, and the
 structure is built so those fixes are local.
+
+---
+
+## Which server it talks to
+
+Production is the default and the fallback: a packed extension that has never
+been configured talks to `https://dai.dolluzcorp.com` and nowhere else. The
+override lives in `chrome.storage.local`, not in a constant in the source, so a
+shipped build cannot be pointed elsewhere by an edit someone forgets to undo.
+
+An override may be https anywhere, or http only on this machine. Sending a
+token over plain http to anything but localhost is how a session gets read off
+a network, and convenience during development is not a reason to allow it.
+`setEndpoints` takes both bases together, because a half-applied override, with
+sign-in going to one place and the API to another, is a confusing way to spend
+an afternoon.
+
+To use a local server: open the popup, expand **Server**, enter
+`http://localhost:4014` and `http://localhost:3000`, and click **Use this
+server**. Chrome asks for the host permission at that click, since localhost is
+optional and a packed build never holds it. Sign in again afterwards; the old
+tokens belong to the old server.
+
+---
+
+## The SDK is vendored, not imported
+
+Chrome only loads files that ship inside the extension, so `web/src/api` cannot
+be imported across the repo. It is copied into `src/shared/sdk/` instead, and
+`build.js` fails if the copy has drifted:
+
+```
+node extension/build.js --sync     re-copy after changing web/src/api
+```
+
+An extension test asserts the same thing, so a drifted copy fails the suite as
+well as the build. That keeps one client contract rather than two that slowly
+disagree.
 
 ---
 

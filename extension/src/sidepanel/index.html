@@ -21,17 +21,44 @@
         <span class="name">Kody</span>
         <span id="conn" class="conn" data-state="off">offline</span>
       </span>
+      <span id="points" class="points" title="Cheer points" hidden></span>
     </div>
 
-    <main id="thread" class="thread" aria-live="polite">
-      <div id="empty" class="empty">
-        <p class="empty-title">Ask Kody</p>
-        <p class="empty-body">
-          Denials, codes, payer rules, Agile, security and development. Codes are
-          looked up in the code sets, never invented.
+    <nav class="tabs" aria-label="Kody sections">
+      <button id="tab-ask" class="tab on" type="button">Ask</button>
+      <button id="tab-chats" class="tab" type="button">Chats</button>
+      <button id="tab-saved" class="tab" type="button">Saved</button>
+      <button id="tab-history" class="tab" type="button">History</button>
+    </nav>
+
+    <section id="panel-ask" class="pane pane-ask">
+      <main id="thread" class="thread" aria-live="polite">
+        <div id="empty" class="empty">
+          <p class="empty-title">Ask Kody</p>
+          <p class="empty-body">
+            Denials, codes, payer rules, Agile, security and development. Codes are
+            looked up in the code sets, never invented.
+          </p>
+        </div>
+      </main>
+    </section>
+
+    <!-- Chats is Phase 2. The tab is here now so the shape of the panel is the
+         shape of the prototype, and so nobody has to redraw it later. -->
+    <section id="panel-chats" class="pane" hidden>
+      <div class="soon">
+        <p class="soon-title">Chats</p>
+        <p class="soon-body">
+          Direct messages, groups and channels, with @kody in any of them.
+          Coming in Phase 2.
         </p>
       </div>
-    </main>
+    </section>
+
+    <section id="panel-saved" class="pane" hidden></section>
+    <section id="panel-history" class="pane" hidden></section>
+
+    <div id="codes" class="codes" hidden></div>
 
     <section id="signin" class="signin" hidden>
       <p class="signin-body">

@@ -6,7 +6,7 @@ by a real person. PENDING = not started. Update this table at the end of every s
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Assemble the 15 modules, fill what they never shipped, pass the suite on real MySQL 8 + Redis | DONE |
-| 1 | Sign-in through dAdmin, the extension client (Ask Kody), SME loop with notifications, dAI admin pages in dAdmin | 1.1, 1.2, 1.3 DONE. 1.4 in progress |
+| 1 | Sign-in through dAdmin, the extension client (Ask Kody), SME loop with notifications, dAI admin pages in dAdmin | 1.1, 1.2, 1.3 DONE. 1.4a, 1.4b, 1.4c DONE. 1.4d next |
 | 2 | Team chat, files with virus scan, search, notifications UI, daily digest by SendGrid | BUILT on the server, UI PENDING |
 | 3 | Chrome extension: packaging and the Web Store listing. The missing files and the real browser test moved into 1.4 | PENDING |
 | 4 | Production on DigitalOcean: droplet, managed MySQL, Spaces, Redis, ClamAV, Caddy, first real Claude call, CMS code import | PENDING |
@@ -126,6 +126,31 @@ by a real person. PENDING = not started. Update this table at the end of every s
          recent codes strip, points and the feedback buttons, same look, no redesign.
          The Chats tab shows "coming in Phase 2" with the layout in place. Every call goes
          through web/src/api. No token in the content script (rule 22).
+         DONE 2026-09-24. Four tabs, the answer card with its lookup block, chips,
+         disclaimer and citations, Save, Copy, Helpful and Not helpful, the recent codes
+         strip and the cheer points wallet. Chats is the prototype's layout with a
+         "Coming in Phase 2" note. API_BASE and SITE_BASE are configurable:
+         src/shared/config.js, production by default, overridable from the popup's Server
+         section, https anywhere or http only on this machine.
+         Evidence: extension.test.js 43/43 with 13 new tests, node extension/build.js
+         passes, FULL SUITE 559/559 TWICE. Three mutations caught and restored byte for
+         byte: a drifted vendored SDK, http allowed to point anywhere, and the session
+         check dropped from kody:points.
+         Learned along the way:
+         - The panel holds no token and makes no fetch. Every call is a message to the
+           worker, which owns the one refresh. That is not only rule 22: the API treats a
+           reused refresh token as theft and kills every session, so a second refresher in
+           a second context would sign people out for no reason.
+         - web/src/api cannot be imported across the repo, because Chrome only loads files
+           inside the extension. It is vendored into src/shared/sdk/ and build.js fails on
+           drift, so there is still one client contract. --sync re-copies it.
+         - An answer is model output, so the whole panel is built with createElement and
+           textContent, and a link is followed only if it is http or https. A model can
+           return javascript: as easily as https:.
+         - Chrome will not call a host the manifest never asked for. localhost is an
+           optional host permission, requested from the popup click, so a packed build
+           never carries it.
+         - NOT verified: no browser has rendered the panel. That is the 1.4 done-check.
     1.4d The sign-in page on the dAI host that hands the login back to the extension, from
          prototypes/kody_auth_flow_v11.jsx. It signs in with dAdmin credentials, as 1.1 does.
     Done-check for 1.4 as a whole, in a real Chrome: load the unpacked extension, sign in

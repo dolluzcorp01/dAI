@@ -131,6 +131,50 @@ button {
   color: var(--red);
 }
 
+/* dAI: which server. Development only, folded away by default. */
+
+.dev {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+
+.dev summary {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.where { margin: 8px 0 2px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+
+.dev-label {
+  display: block;
+  margin-top: 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.dev-input {
+  width: 100%;
+  margin-top: 3px;
+  padding: 6px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 11.5px;
+  color: var(--ink);
+  outline: none;
+}
+
+.dev-input:focus { border-color: var(--gold); }
+
+.dev-row { display: flex; gap: 6px; }
+.dev-row .quiet { flex: 1; font-size: 11px; }
+
+.dev-note { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--muted); }
+
 button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

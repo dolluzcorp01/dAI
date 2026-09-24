@@ -41,6 +41,25 @@
       </section>
 
       <p id="error" class="error" hidden></p>
+
+      <!-- dAI: development only. Production is the default and the fallback,
+           and shared/config.js refuses anything but https or http on this
+           machine (docs/14-extension.md). -->
+      <details class="dev">
+        <summary>Server</summary>
+        <p id="where" class="where"></p>
+        <label class="dev-label" for="api-base">API</label>
+        <input id="api-base" class="dev-input" type="url" spellcheck="false"
+               placeholder="http://localhost:4014" />
+        <label class="dev-label" for="site-base">Site</label>
+        <input id="site-base" class="dev-input" type="url" spellcheck="false"
+               placeholder="http://localhost:3000" />
+        <div class="dev-row">
+          <button id="dev-use" class="quiet" type="button">Use this server</button>
+          <button id="dev-reset" class="quiet" type="button">Back to production</button>
+        </div>
+        <p id="dev-note" class="dev-note" hidden></p>
+      </details>
     </main>
 
     <script type="module" src="popup.js"></script>
