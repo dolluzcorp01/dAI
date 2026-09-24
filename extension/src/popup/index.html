@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Kody</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <!-- No inline script and no inline handlers: the extension CSP forbids both,
+         and extension/build.js fails the build if either appears. -->
+    <header class="brand">
+      <img class="mark" src="../../icons/icon-32.png" alt="" />
+      <span class="wordmark">KODY</span>
+      <span class="by">by Dolluz</span>
+    </header>
+
+    <main>
+      <section id="signed-out" hidden>
+        <p class="lede">
+          Kody signs you in on the Dolluz site. Your password is never typed into
+          the extension.
+        </p>
+        <button id="sign-in" class="primary" type="button">Continue to Dolluz</button>
+      </section>
+
+      <section id="signed-in" hidden>
+        <div class="who">
+          <span id="initials" class="avatar"></span>
+          <span class="names">
+            <span id="full-name" class="full-name"></span>
+            <span id="email" class="email"></span>
+          </span>
+        </div>
+        <p id="live" class="live">Signed in. The bubble is on every tab.</p>
+        <button id="open-panel" class="primary" type="button">Open Kody</button>
+        <button id="sign-out" class="quiet" type="button">Sign out</button>
+      </section>
+
+      <section id="loading">
+        <p class="lede">Checking your session...</p>
+      </section>
+
+      <p id="error" class="error" hidden></p>
+    </main>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

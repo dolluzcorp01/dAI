@@ -1,0 +1,41 @@
+/*
+ * The only styles that reach the page.
+ *
+ * Everything the bubble looks like lives in its closed shadow root, in
+ * bubble.js. This file exists for one reason: a host page cannot be trusted not
+ * to have rules like `div { position: static !important }` or a stacking
+ * context that would bury us, so the handful of properties that decide whether
+ * the bubble is visible at all are pinned here.
+ *
+ * It is scoped to our own element id and sets nothing else, so it cannot change
+ * how the page looks. Kody does not restyle the payer portal.
+ */
+
+#kody-bubble-host {
+  position: fixed !important;
+  z-index: 2147483646 !important;
+  width: 52px !important;
+  height: 52px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  pointer-events: auto !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  float: none !important;
+  clip: auto !important;
+  clip-path: none !important;
+  transform: none !important;
+  filter: none !important;
+  max-width: none !important;
+  max-height: none !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  contain: none !important;
+}
+
+/* Printing a claim should not print a floating button over it. */
+@media print {
+  #kody-bubble-host { display: none !important; }
+}

@@ -21,6 +21,11 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | server/src/services/dadmin.service.js | Phase 1.1. Reads dadmin.employee (the nine granted columns only), bcrypt-compares account_pass, maps the access level to a role on first creation, and creates, adopts or refreshes the Kody user. |
 | server/src/middleware/dadmin-service.js | Phase 1.2. Verifies a short lived JWT signed with DADMIN_SHARED_JWT_SECRET, audience dai-admin, maps emp_id to the Kody user and their roles, and leaves the routers' own requireRole checks to do the rest. |
 | server/scripts/verify-1.1.js | Phase 1.1 done-check, run by hand against a live API. Reads the granted columns only, never writes to dadmin, prints no password or token. |
+| extension/src/popup/index.html, popup.css, popup.js | Phase 1.4b. The manifest named the popup but it was never shipped, so the extension could not load. It starts the handoff and signs out; it holds no login form, no password and no token. |
+| extension/src/sidepanel/index.html, sidepanel.css | Phase 1.4b. The panel sidepanel.js drives, in the v10 look. The tabs, recent codes and points arrive in 1.4c. |
+| extension/src/content/bubble.css | Phase 1.4b. The only styles that reach the page: the properties that decide whether the bubble is visible, scoped to our own element id. |
+| extension/icons/icon-16, 32, 48, 128.png | Phase 1.4b. The Dolluz K in gold on near black, drawn by extension/tools/make-icons.js. |
+| extension/tools/make-icons.js | Phase 1.4b. Draws the icons, so the committed binaries are reproducible rather than pasted from somewhere. |
 | server/tests/sub-admin.test.js | Phase 1.1 follow-up. 31 tests naming every route a sub_admin may and may not reach. |
 | server/tests/dadmin-service.test.js | Phase 1.2. 14 tests, including that a service token opens nothing outside the whitelist. |
 | server/tests/dadmin.test.js | Phase 1.1. 20 tests. dadmin is read only and CI has no dadmin database, so the two reader functions are replaced by a fake employee table; everything else runs for real. |

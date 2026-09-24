@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Kody</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <!-- Answers render here, not in the page: this runs in the extension's own
+         origin, where the site cannot read it. No inline script, no inline
+         handlers, nothing loaded from the network. -->
+    <header class="brand">
+      <img class="mark" src="../../icons/icon-32.png" alt="" />
+      <span class="wordmark">DOLLUZ CORP</span>
+      <span class="tagline">One Place . One Start . One Team</span>
+    </header>
+
+    <div class="titlebar">
+      <span class="avatar" aria-hidden="true">K</span>
+      <span class="titles">
+        <span class="name">Kody</span>
+        <span id="conn" class="conn" data-state="off">offline</span>
+      </span>
+    </div>
+
+    <main id="thread" class="thread" aria-live="polite">
+      <div id="empty" class="empty">
+        <p class="empty-title">Ask Kody</p>
+        <p class="empty-body">
+          Denials, codes, payer rules, Agile, security and development. Codes are
+          looked up in the code sets, never invented.
+        </p>
+      </div>
+    </main>
+
+    <section id="signin" class="signin" hidden>
+      <p class="signin-body">
+        Sign in with your Dolluz account to ask Kody. Your password is typed on the
+        Dolluz site, never here.
+      </p>
+      <button id="signin-btn" class="primary" type="button">Sign in</button>
+    </section>
+
+    <form id="composer" class="composer">
+      <textarea
+        id="input"
+        class="input"
+        rows="1"
+        placeholder="Ask Kody"
+        aria-label="Ask Kody"
+      ></textarea>
+      <button id="send" class="send" type="submit" aria-label="Send">Send</button>
+    </form>
+
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>

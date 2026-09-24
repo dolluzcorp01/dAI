@@ -109,6 +109,19 @@ by a real person. PENDING = not started. Update this table at the end of every s
          src/content/bubble.css, and icons at 16, 32, 48 and 128.
          Done-check: the 2 failing extension tests pass and the "static safety" group,
          which could not even load, loads and passes. node extension/build.js passes.
+         DONE 2026-09-24. src/popup/index.html, popup.css, popup.js; src/sidepanel/index.html
+         and sidepanel.css; src/content/bubble.css; icons 16, 32, 48, 128 drawn by
+         extension/tools/make-icons.js, which is committed so they can be redrawn.
+         extension.test.js 30/30 including the static safety group, build.js passes, and the
+         FULL SUITE IS 525/525 TWICE, green for the first time in this project.
+         Learned along the way:
+         - bubble.css is the only styling that reaches the page, so it pins the handful of
+           properties that decide whether the bubble is visible at all, scoped to our own
+           element id, and sets nothing else. The look lives in the closed shadow root.
+         - The icons are generated rather than pasted so they are reproducible: running the
+           script again writes the same bytes.
+         - NOT verified: no browser has rendered any of this. The HTML, the CSS and the
+           panel in a real Chrome are the 1.4 done-check, with screenshots.
     1.4c The side panel, from prototypes/kody_prototype_v10.jsx: Ask, History, Saved, the
          recent codes strip, points and the feedback buttons, same look, no redesign.
          The Chats tab shows "coming in Phase 2" with the layout in place. Every call goes
