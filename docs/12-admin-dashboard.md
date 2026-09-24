@@ -180,6 +180,37 @@ does not is mostly read-only aggregation plus two export formats.
 
 ---
 
+## What the headline numbers count, before you label one
+
+dAI: the dAdmin console labelled `activeUsers` as people using Kody and
+overstated it eightfold. It counts accounts. On the development database that
+was 218 accounts against 28 people who had ever asked anything.
+
+The two to keep apart:
+
+| Field | What it counts |
+|---|---|
+| `accountsTotal` | Accounts that exist and are not deactivated or deleted. Not usage. |
+| `peopleWhoAsked7d` | Distinct people who asked at least one question in 7 days. This is usage. |
+
+`activeUsers` and `activeUsers7d` remain as aliases so nothing breaks, and they
+mean exactly the same as the two above. Do not label either as activity.
+
+Three more that are easy to read wrong:
+
+- `avgLatencyMs` is a **mean**, not a median. The v12 prototype's "Median answer
+  time" tile is mislabelled: either rename the label or compute a median.
+- `tier0Share` and `degradedRate` are fractions between 0 and 1. Multiply by 100
+  to show a percentage.
+- `inputTokens30d` and `outputTokens30d` are **tokens, not money**. The API knows
+  no prices and reports no spend, so the v12 "Model spend $41.20" tile has no
+  field behind it. Either price the tokens in dAdmin, deliberately, or drop the
+  tile.
+
+`GET /api/admin/analytics/fields` serves these definitions, so a dashboard can
+show the same sentence the API means. A test fails if a headline field is added
+without a definition.
+
 ## A note on the analytics
 
 Every number on the overview is derivable from tables that already exist:

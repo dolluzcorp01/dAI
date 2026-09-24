@@ -13,6 +13,47 @@ const db = require("../db");
  * full scans on every page load is not.
  */
 
+/**
+ * dAI: what every headline field actually counts.
+ *
+ * The dAdmin console read activeUsers as "how many people use Kody" and
+ * overstated it eightfold: it is every account that exists, and most accounts
+ * have never asked anything. A number on a dashboard is read by someone who
+ * will not open this file, so each one says what it is, the API serves this
+ * guide at GET /api/admin/analytics/fields, and a test fails if a field is
+ * added to the headline without a line here.
+ *
+ * The pairs to keep straight:
+ *   accountsTotal      how many accounts exist
+ *   peopleWhoAsked7d   how many people actually used Kody in the last week
+ */
+const FIELD_GUIDE = {
+  accountsTotal: "Accounts that exist and are not deactivated or deleted. NOT a measure of use: most accounts may never have asked anything.",
+  peopleWhoAsked7d: "Distinct people who asked Kody at least one question in the last 7 days. This is the usage figure.",
+  activeUsers: "Deprecated alias of accountsTotal, kept so existing callers do not break. Do not label it as activity.",
+  activeUsers7d: "Deprecated alias of peopleWhoAsked7d.",
+  questionsToday: "Questions asked since midnight, server time.",
+  questionsYesterday: "Questions asked during the whole of yesterday.",
+  questionsDelta: "Percentage change from yesterday to today, or null when yesterday was zero.",
+  answers30d: "Answers Kody produced in the last 30 days, every tier including lookups.",
+  tier0Share: "Fraction between 0 and 1 of those answers that came from the code tables with no model call. Multiply by 100 to show a percentage.",
+  avgLatencyMs: "MEAN answer time in milliseconds over the last 30 days, tier 1 and above. It is an average, not a median: one slow answer moves it.",
+  maxLatencyMs: "Slowest single answer in the last 30 days, in milliseconds.",
+  degradedRate: "Fraction between 0 and 1 of answers that told the person Kody could not answer properly.",
+  inputTokens30d: "Prompt tokens sent to models in the last 30 days. Tokens, not money: the API knows no prices and reports no spend.",
+  outputTokens30d: "Tokens models returned in the last 30 days. Tokens, not money.",
+  messages7d: "Chat messages sent between people in the last 7 days. Nothing to do with Kody answers.",
+  filesStored: "Attachments that are clean and not deleted, across the whole organisation.",
+  storageMb: "Megabytes those attachments occupy.",
+  cached: "True when this response came from the sixty second cache rather than being computed.",
+  generatedAt: "When the overview was computed.",
+  domains: "Answers by domain for the last 30 days, with how many were low confidence.",
+  tiers: "Answers by tier for the last 30 days, with mean latency and token totals.",
+  models: "Answers by model for the last 30 days, with token totals and mean latency.",
+  unanswered: "Questions answered with low confidence or with no supporting document. Every such question appears, not only ones asked repeatedly: `asked` is how many times that exact wording came up.",
+  knowledge: "Corpus health: published documents, how many have ever been cited, the open SME queue, and current code entries.",
+};
+
 const CACHE_MS = Number(process.env.ANALYTICS_CACHE_MS || 60000);
 const cache = new Map();
 
@@ -31,7 +72,8 @@ const pct = (a, b) => (b === 0 ? null : Math.round(((a - b) / b) * 100));
 /* ---------------- headline numbers ---------------- */
 
 async function headline() {
-  const activeUsers = await db.one(
+  // dAI: this counts ACCOUNTS, not people using Kody. See FIELD_GUIDE above.
+  const accounts = await db.one(
     `SELECT COUNT(*) AS n FROM users WHERE is_active = 1 AND deleted_at IS NULL`
   );
   const activeRecently = await db.one(
@@ -87,7 +129,12 @@ async function headline() {
 
   const total = Number(tiers.total) || 0;
   return {
-    activeUsers: Number(activeUsers.n),
+    // dAI: named so they cannot be confused with each other. The two old names
+    // stay as aliases, so dAdmin and anything else already reading them keeps
+    // working while it moves across.
+    accountsTotal: Number(accounts.n),
+    peopleWhoAsked7d: Number(activeRecently.n),
+    activeUsers: Number(accounts.n),
     activeUsers7d: Number(activeRecently.n),
     questionsToday: Number(today.n),
     questionsYesterday: Number(yesterday.n),
@@ -255,4 +302,5 @@ async function byPerson({ from, to } = {}) {
 module.exports = {
   overview, headline, byDomain, byTier, byModel, unanswered,
   knowledgeHealth, byPerson, clearCache, CACHE_MS,
+  FIELD_GUIDE,   // dAI: what every headline field actually counts
 };

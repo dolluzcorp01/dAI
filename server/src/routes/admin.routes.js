@@ -19,6 +19,7 @@ router.use(authenticate);
 // top exists to give, and it is kept: this is still one gate, with an allowlist.
 const SUB_ADMIN_READ_ONLY = new Set([
   "GET /overview",
+  "GET /analytics/fields",
   "GET /analytics/domains",
   "GET /analytics/tiers",
   "GET /analytics/models",
@@ -61,6 +62,12 @@ function id(req, name = "id") {
 
 router.get("/overview", wrap(async (req, res) => {
   res.json(await analytics.overview());
+}));
+
+/* dAI: what every headline number means, so a dashboard cannot label one wrong
+   without contradicting the API it came from. */
+router.get("/analytics/fields", wrap(async (req, res) => {
+  res.json({ fields: analytics.FIELD_GUIDE });
 }));
 
 router.get("/analytics/domains", wrap(async (req, res) => {
