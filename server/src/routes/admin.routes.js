@@ -11,7 +11,31 @@ router.use(authenticate);
 
 // Everything in the console is admin only. Analytics included: question text
 // and per-person usage are not things a member should be able to read.
-router.use(requireRole("admin", "super_admin"));
+//
+// dAI: a dAdmin Sub Admin maps to Kody sub_admin (docs/PHASES.md 1.1), and gets
+// the read-only panels of the console, named one by one below. Everything else
+// stays admin only, so a route added to this router later is out of reach until
+// someone adds it here on purpose. That is the property the single gate at the
+// top exists to give, and it is kept: this is still one gate, with an allowlist.
+const SUB_ADMIN_READ_ONLY = new Set([
+  "GET /overview",
+  "GET /analytics/domains",
+  "GET /analytics/tiers",
+  "GET /analytics/models",
+  "GET /analytics/unanswered",
+  "GET /analytics/people",
+  "GET /spaces",
+  "GET /audit",
+  "GET /audit/actions",
+]);
+
+function consoleAccess(req, res, next) {
+  const roles = (req.auth && req.auth.roles) || [];
+  if (roles.includes("admin") || roles.includes("super_admin")) return next();
+  if (roles.includes("sub_admin") && SUB_ADMIN_READ_ONLY.has(`${req.method} ${req.path}`)) return next();
+  return res.status(403).json({ error: "forbidden", message: "You do not have access to this." });
+}
+router.use(consoleAccess);
 
 const ctxOf = (req) => ({ ip: req.ip, userAgent: req.get("user-agent"), userId: req.auth.userId });
 

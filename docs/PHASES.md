@@ -22,6 +22,11 @@ by a real person. PENDING = not started. Update this table at the end of every s
       everyone else -> member. Never overwrite a role later edited in dAI.
     - Refresh also re-checks active and app_dAI, so revoking in dAdmin ends access.
     - Local Kody passwords remain for development and tests only; production refuses them.
+    - sub_admin gate (added 2026-09-24): a Sub Admin was mapped but named in no role list, so
+      they were refused across the console. They now get the read-only console panels, knowledge
+      authoring, the SME queue and the people list. Publishing, code imports, licences, settings,
+      points rules, sessions, versions, quick links, reports, role changes, activation,
+      announcements and the digest stay with admin.
     - Forgot password points to the dAdmin reset flow (the password belongs to dAdmin).
     Done-check: a dadmin employee with app_dAI = 1 signs in with no one creating anything by hand;
     app_dAI = 0 is refused; turning it off ends their session on next refresh.

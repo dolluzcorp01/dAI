@@ -36,7 +36,10 @@ function id(req) {
 }
 
 // Authoring is open to SMEs and above. Publishing and importing are not.
-const author = requireRole("admin", "super_admin", "coordinator");
+// dAI: sub_admin authors too (docs/PHASES.md 1.1). Publishing decides what Kody
+// tells people, and a licence record is a contractual claim about CPT and CDT,
+// so both stay with admin.
+const author = requireRole("admin", "super_admin", "coordinator", "sub_admin");
 const publisher = requireRole("admin", "super_admin");
 
 /* ---- documents ---- */

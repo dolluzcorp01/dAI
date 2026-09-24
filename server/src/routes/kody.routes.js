@@ -42,7 +42,8 @@ const askLimiter = rateLimit({
 });
 
 // SME review is open to coordinators (subject experts) and above.
-const sme = requireRole("admin", "super_admin", "coordinator");
+// dAI: sub_admin works the queue too (docs/PHASES.md 1.1).
+const sme = requireRole("admin", "super_admin", "coordinator", "sub_admin");
 
 /* POST /api/kody/ask */
 router.post("/ask", askLimiter, wrap(async (req, res) => {

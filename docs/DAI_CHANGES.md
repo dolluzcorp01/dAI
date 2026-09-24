@@ -21,6 +21,7 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | server/src/services/dadmin.service.js | Phase 1.1. Reads dadmin.employee (the nine granted columns only), bcrypt-compares account_pass, maps the access level to a role on first creation, and creates, adopts or refreshes the Kody user. |
 | server/src/middleware/dadmin-service.js | Phase 1.2. Verifies a short lived JWT signed with DADMIN_SHARED_JWT_SECRET, audience dai-admin, maps emp_id to the Kody user and their roles, and leaves the routers' own requireRole checks to do the rest. |
 | server/scripts/verify-1.1.js | Phase 1.1 done-check, run by hand against a live API. Reads the granted columns only, never writes to dadmin, prints no password or token. |
+| server/tests/sub-admin.test.js | Phase 1.1 follow-up. 31 tests naming every route a sub_admin may and may not reach. |
 | server/tests/dadmin-service.test.js | Phase 1.2. 14 tests, including that a service token opens nothing outside the whitelist. |
 | server/tests/dadmin.test.js | Phase 1.1. 20 tests. dadmin is read only and CI has no dadmin database, so the two reader functions are replaced by a fake employee table; everything else runs for real. |
 
@@ -36,6 +37,10 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | server/src/services/kody.service.js | Store and read lookup_description (migration 007 added the column; the service never used it). |
 | server/src/services/auth.service.js | Phase 1.1. login() tries dadmin.employee first and falls back to a local Kody password only outside production; refresh() re-checks active and app_dAI for a user that carries an emp_id, and revokes every session for that person when access is gone. |
 | server/src/routes/auth.routes.js | Phase 1.1. POST /api/auth/forgot-password, which points at the dAdmin reset flow. The password belongs to dAdmin, so dAI never resets one. dAdmin has no separate reset page, so DADMIN_RESET_URL is its sign-in page and the message names the Forgot password button. |
+| server/src/routes/admin.routes.js | Phase 1.1 follow-up. sub_admin was mapped from dAdmin but named in no requireRole list, so a Sub Admin signed in and was then refused across the whole console. The single gate at the top now also admits sub_admin to an explicit allowlist of read-only panels (overview, the five analytics routes, spaces, audit). Everything else stays admin only, so a route added later is still out of reach until it is named. |
+| server/src/routes/knowledge.routes.js | Phase 1.1 follow-up. sub_admin authors documents. Publishing, importing and recording a licence stay with admin. |
+| server/src/routes/kody.routes.js | Phase 1.1 follow-up. sub_admin works the SME queue. |
+| server/src/routes/users.routes.js | Phase 1.1 follow-up. sub_admin reads the people list. Changing roles and activation stay with admin: someone who can grant roles can promote themselves. |
 | server/src/app.js | Phase 1.2. Mounts the dAdmin service token middleware on /api/admin, /api/knowledge, /api/kody/sme, /api/users/admin and POST /api/notifications/announce, before the routers and nowhere else. |
 | server/src/middleware/auth.js | Phase 1.2. authenticate() passes a request straight through when a dAdmin service token has already been verified and mapped to a user. A service call holds no session, so there is nothing to look up. |
 | server/src/config.js | Phase 1.1. Added the dadmin block: DADMIN_DB_NAME, DADMIN_SHARED_JWT_SECRET, DADMIN_RESET_URL. |

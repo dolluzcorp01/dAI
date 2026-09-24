@@ -104,8 +104,12 @@ router.get("/:id", wrap(async (req, res) => {
 /* ---------------- admin ---------------- */
 
 const adminOnly = requireRole("admin", "super_admin");
+// dAI: sub_admin reads the people list (docs/PHASES.md 1.1). Roles and
+// activation stay with admin: someone who can grant roles can make themselves
+// an admin, which would make the level meaningless.
+const listOnly = requireRole("admin", "super_admin", "sub_admin");
 
-router.get("/admin/list", adminOnly, wrap(async (req, res) => {
+router.get("/admin/list", listOnly, wrap(async (req, res) => {
   res.json(await svc.adminListUsers({
     includeInactive: req.query.includeInactive === "true",
     limit: req.query.limit, offset: req.query.offset,
