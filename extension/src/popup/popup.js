@@ -158,8 +158,15 @@ $("dev-use").addEventListener("click", async () => {
   // localhost is optional so a packed build never holds it. Ask at the moment
   // it is needed, from this click, which is the user gesture Chrome requires.
   try {
+    // A Chrome match pattern has no port: http://localhost:4014/* is rejected as
+    // invalid, and http://localhost/* covers every port on the host anyway.
     const origins = [apiBase, siteBase]
-      .map(b => { try { return `${new URL(b).origin}/*`; } catch (_) { return null; } })
+      .map(b => {
+        try {
+          const u = new URL(b);
+          return `${u.protocol}//${u.hostname}/*`;
+        } catch (_) { return null; }
+      })
       .filter(o => o && o.startsWith("http://"));
     if (origins.length > 0) {
       const granted = await chrome.permissions.request({ origins: [...new Set(origins)] });

@@ -327,6 +327,28 @@ describe("where the extension talks to", () => {
       "identity should stay optional, so a fresh install asks for nothing");
   });
 
+  test("the host permission it asks for is a valid match pattern", () => {
+    // Chrome rejects a match pattern that carries a port, and the manifest's
+    // optional host is http://localhost/*, which covers every port anyway.
+    const popup = readExt("src/popup/popup.js");
+    assert.ok(!/\$\{new URL\(b\)\.origin\}\/\*/.test(popup),
+      "an origin carries a port, which is not a valid match pattern");
+    assert.match(popup, /\$\{u\.protocol\}\/\/\$\{u\.hostname\}\/\*/);
+    for (const host of manifest.optional_host_permissions) {
+      assert.ok(!/:\d+/.test(host), `${host} carries a port`);
+    }
+  });
+
+  test("changing server drops the tokens the old one issued", () => {
+    const worker = readExt("src/background/service-worker.js");
+    const at = worker.indexOf('case "kody:set-endpoints"');
+    assert.ok(at > 0);
+    const block = worker.slice(at, at + 900);
+    assert.match(block, /clearTokens\(\)/,
+      "a token from the old server would look signed in and fail on the first call");
+    assert.match(block, /kody:signed-out/, "the panel is not told");
+  });
+
   test("the sign in URL follows the configured server, not a constant", () => {
     const worker = readExt("src/background/service-worker.js");
     assert.match(worker, /beginSignIn\(\{ redirectUri, siteBase \}\)/,

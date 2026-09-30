@@ -257,6 +257,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const out = message.reset
           ? await clearEndpoints()
           : await setEndpoints({ apiBase: message.apiBase, siteBase: message.siteBase });
+        if (out.ok !== false) {
+          // dAI: a token belongs to the server that issued it. Keeping one
+          // across a change looks signed in and fails on the first call.
+          await clearTokens();
+          broadcast({ type: "kody:signed-out" });
+          await updateBadge();
+        }
         resetApi();
         sendResponse(out.ok === false ? out : { ok: true, ...(await endpoints()) });
         return;

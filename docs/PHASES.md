@@ -185,7 +185,10 @@ by a real person. PENDING = not started. Update this table at the end of every s
          an optional permission, so chrome.identity does not exist until it is granted and
          Chrome only grants it from a user gesture. Both sign in buttons now ask on the
          click, and the worker's tab fallback refuses against a local server instead of
-         opening a tab that cannot finish. Full suite 573/573 twice.
+         opening a tab that cannot finish. Two more found the same way: a Chrome match
+         pattern may not carry a port, so the popup asked for http://localhost:4014/* and
+         Chrome rejected it; and changing server kept the old server's tokens, which looks
+         signed in and fails on the first call. Full suite 575/575 twice.
     Done-check for 1.4 as a whole, in a real Chrome: load the unpacked extension, sign in
     with a dAdmin password, click the bubble, ask CO-45 and a general question, thumbs down
     one, and see it reach the dAdmin SME queue. Screenshots of each step.
