@@ -57,14 +57,15 @@ async function signIn() {
     : `https://${chrome.runtime.id}.chromiumapp.org/kody`;
 
   resetApi();                      // dAI: endpoints may have changed since the last call
-  const { url } = await beginSignIn({ redirectUri });
+  const { siteBase, apiBase } = await endpoints();
+  const { url } = await beginSignIn({ redirectUri, siteBase });
 
   // launchWebAuthFlow gives us the redirect without leaving a tab behind.
   if (chrome.identity && chrome.identity.launchWebAuthFlow) {
     try {
       const redirect = await chrome.identity.launchWebAuthFlow({ url, interactive: true });
       if (!redirect) return { ok: false, error: "cancelled", message: "Sign in was cancelled." };
-      const out = await completeSignIn(redirect);
+      const out = await completeSignIn(redirect, { apiBase });
       await updateBadge();
       return out;
     } catch (err) {
@@ -95,8 +96,9 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
       sendResponse({ ok: false, error: "unknown_message" });
       return;
     }
+    const { apiBase } = await endpoints();
     const fake = `https://handoff/?code=${encodeURIComponent(message.code)}&state=${encodeURIComponent(message.state)}`;
-    const out = await completeSignIn(fake);
+    const out = await completeSignIn(fake, { apiBase });
     await updateBadge();
     sendResponse(out);
   })();

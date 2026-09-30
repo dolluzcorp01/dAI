@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Sign in to Kody</title>
+    <link rel="stylesheet" href="/extension/authorize/authorize.css" />
+  </head>
+  <body>
+    <!-- The sign in page, from prototypes/kody_auth_flow_v11.jsx.
+
+         This is the ONLY place a Kody password is ever typed. The extension
+         never sees it: this page swaps it for a one-time code and hands that
+         code back (docs/14-extension.md).
+
+         No inline script and no inline handlers. The page is served with its
+         own content security policy, which allows script from this origin and
+         nothing else. -->
+    <main class="card" id="card">
+      <header class="head">
+        <span class="tile" aria-hidden="true">
+          <img src="/extension/authorize/logo.svg" alt="" width="17" height="17" />
+        </span>
+        <span class="titles">
+          <span class="title">Sign in to Kody</span>
+          <span id="host" class="host"></span>
+        </span>
+      </header>
+
+      <p class="shield">
+        <span class="shield-mark" aria-hidden="true">&#9733;</span>
+        <span id="shield-text">Authorising the Kody browser extension</span>
+      </p>
+
+      <form id="form" novalidate>
+        <label class="label" for="email">Work email</label>
+        <input id="email" class="field" type="email" name="email" autocomplete="username"
+               autocapitalize="off" spellcheck="false" required />
+
+        <label class="label" for="password">Password</label>
+        <input id="password" class="field" type="password" name="password"
+               autocomplete="current-password" required />
+
+        <p id="error" class="error" hidden></p>
+
+        <button id="submit" class="primary" type="submit">Sign in</button>
+      </form>
+
+      <p class="forgot">
+        <a id="forgot" href="#">Forgot password?</a>
+      </p>
+
+      <div class="or"><span>or</span></div>
+
+      <!-- Disabled on purpose. The prototype shows where single sign-on lands,
+           and a button that looks ready but does nothing is worse than one that
+           says it is not ready yet. -->
+      <button class="sso" type="button" disabled>Continue with Microsoft</button>
+      <button class="sso" type="button" disabled>Continue with Google</button>
+      <p class="note">SSO drops in here later without changing the extension</p>
+    </main>
+
+    <!-- The handoff, which replaces the card once a code exists. -->
+    <main class="handoff" id="handoff" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <p class="handoff-title">Authorising Kody</p>
+      <ol class="steps">
+        <li id="step-1">Signed in on dai.dolluzcorp.com</li>
+        <li id="step-2">One-time code returned to the extension</li>
+        <li id="step-3">Extension swaps it for its own session</li>
+      </ol>
+      <p id="handoff-note" class="note">You can close this tab when Kody says it is signed in.</p>
+    </main>
+
+    <!-- Shown instead of the form when this page was not opened by the
+         extension, so a password is never typed into a page that has nowhere
+         legitimate to send the result. -->
+    <main class="card refused" id="refused" hidden>
+      <p class="refused-title">This page was not opened by Kody</p>
+      <p class="refused-body" id="refused-body">
+        Open the Kody extension and choose Sign in. This page only works as part
+        of that flow.
+      </p>
+    </main>
+
+    <script type="module" src="/extension/authorize/authorize.js"></script>
+  </body>
+</html>

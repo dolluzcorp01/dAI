@@ -1,0 +1,182 @@
+/* The sign in card, from prototypes/kody_auth_flow_v11.jsx: the 300px white
+   card on a light canvas, the dark logo tile, the gold authorising strip and
+   the gold button. Same look, no redesign. */
+
+:root {
+  --ink: #101828;
+  --muted: #667085;
+  --hairline: #e4e7ec;
+  --canvas: #f7f8fa;
+  --gold: #c79a18;
+  --gold-soft: #fbf3dc;
+  --gold-deep: #9a7710;
+  --red: #b42318;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.card {
+  width: 300px;
+  padding: 22px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 26px rgba(16, 24, 40, 0.08);
+}
+
+.head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+
+.tile {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: #111417;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.titles { display: flex; flex-direction: column; min-width: 0; }
+.title { font-size: 13.5px; font-weight: 650; }
+.host { font-size: 10.5px; color: var(--muted); }
+
+.shield {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--gold-soft);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--gold-deep);
+}
+
+.shield-mark { flex-shrink: 0; }
+
+.label { display: block; margin-bottom: 4px; font-size: 11px; color: var(--muted); }
+
+.field {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+  outline: none;
+}
+
+.field:focus { border-color: var(--gold); }
+
+.primary {
+  width: 100%;
+  margin-top: 2px;
+  padding: 10px 0;
+  border: none;
+  border-radius: 8px;
+  background: var(--gold);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary:hover { background: var(--gold-deep); }
+.primary:disabled { background: #e7eaee; cursor: default; }
+
+.error {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(240, 68, 56, 0.2);
+  border-radius: 8px;
+  background: #fffbfa;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--red);
+}
+
+.error a { color: var(--red); }
+
+.forgot { margin: 10px 0 0; text-align: center; }
+.forgot a { font-size: 11px; color: var(--muted); }
+
+.or { display: flex; align-items: center; gap: 8px; margin: 13px 0 11px; }
+.or::before,
+.or::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+.or span { font-size: 10px; color: var(--muted); }
+
+.sso {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 8px 0;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.sso:disabled { color: #98a2b3; cursor: default; }
+
+.note { margin: 8px 0 0; font-size: 10px; line-height: 1.5; color: var(--muted); text-align: center; }
+
+/* ---------------- handoff ---------------- */
+
+.handoff { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+
+.spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid var(--gold-soft);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.handoff-title { margin: 0; font-size: 13px; font-weight: 600; }
+
+.steps {
+  width: 320px;
+  max-width: 100%;
+  margin: 0;
+  padding: 13px 13px 13px 30px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: #fff;
+  font-size: 11px;
+  line-height: 1.75;
+  color: var(--muted);
+}
+
+/* ---------------- refused ---------------- */
+
+.refused-title { margin: 0 0 8px; font-size: 13px; font-weight: 650; }
+.refused-body { margin: 0; font-size: 11.5px; line-height: 1.6; color: var(--muted); }
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}

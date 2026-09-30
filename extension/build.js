@@ -95,6 +95,14 @@ if (!/^\d+(\.\d+){0,3}$/.test(manifest.version)) problems.push("version must be 
 if ((manifest.description || "").length > 132) problems.push("description must be 132 characters or fewer");
 if (!manifest.icons["128"]) problems.push("a 128px icon is required by the store");
 if (manifest.permissions.includes("<all_urls>")) problems.push("<all_urls> will fail review");
+
+/* externally_connectable decides which sites may send us a message at all. A
+   wildcard there would let any page start a conversation with the worker. */
+for (const match of (manifest.externally_connectable || {}).matches || []) {
+  if (!/^https:\/\/[a-z0-9.-]+\/\*$/.test(match)) {
+    problems.push(`externally_connectable must name one https host: ${match}`);
+  }
+}
 if ((manifest.host_permissions || []).some(h => h === "<all_urls>" || h === "*://*/*")) {
   warnings.push("broad host permissions slow store review");
 }

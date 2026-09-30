@@ -299,6 +299,24 @@ describe("where the extension talks to", () => {
     assert.equal((await config.endpoints(storage)).isProduction, true);
   });
 
+  test("only the Dolluz site may send the extension a message", () => {
+    // Without this key onMessageExternal never fires, so the sign in page
+    // could not hand a code back at all. With a wildcard, any page could try.
+    assert.ok(manifest.externally_connectable, "the sign in page cannot reach the worker");
+    assert.deepEqual(manifest.externally_connectable.matches, ["https://dai.dolluzcorp.com/*"]);
+    for (const match of manifest.externally_connectable.matches) {
+      assert.match(match, /^https:\/\/[a-z0-9.-]+\/\*$/, `${match} is not one https host`);
+    }
+  });
+
+  test("the sign in URL follows the configured server, not a constant", () => {
+    const worker = readExt("src/background/service-worker.js");
+    assert.match(worker, /beginSignIn\(\{ redirectUri, siteBase \}\)/,
+      "sign in would open production even when pointed at a local server");
+    assert.match(worker, /completeSignIn\(redirect, \{ apiBase \}\)/,
+      "the code would be exchanged against production");
+  });
+
   test("the manifest asks for localhost optionally, never as a granted host", () => {
     assert.deepEqual(manifest.optional_host_permissions,
       ["http://localhost/*", "http://127.0.0.1/*"]);
@@ -335,7 +353,7 @@ describe("the side panel", () => {
   test("never holds a token and never calls the API itself", () => {
     assert.ok(!/kody_access|kody_refresh|accessToken|refreshToken/.test(panelSrc),
       "the panel asks the worker; only the worker holds tokens");
-    assert.ok(!/fetch\s*\(/.test(panelSrc), "every call goes through the worker");
+    assert.ok(!/\bfetch\s*\(/.test(panelSrc), "every call goes through the worker");
     assert.ok(!/shared\/(api|auth|sdk)/.test(panelSrc),
       "the panel does not import the API client");
   });

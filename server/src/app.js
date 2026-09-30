@@ -81,6 +81,34 @@ function createApp() {
   app.use("/api/users/admin", dadminServiceMiddleware);
   app.post("/api/notifications/announce", dadminServiceMiddleware);
 
+  // dAI: the extension sign in page (docs/PHASES.md 1.4d). It is the only page
+  // this server serves, and the only place a Kody password is ever typed. It
+  // gets its own content security policy: script and style from this origin,
+  // nothing else at all, and no framing, because it carries a password field.
+  app.use("/extension", (req, res, next) => {
+    res.set("Content-Security-Policy", [
+      "default-src 'none'",
+      "script-src 'self'",
+      "style-src 'self'",
+      "img-src 'self' data:",
+      "connect-src 'self'",
+      "form-action 'none'",
+      "base-uri 'none'",
+      "frame-ancestors 'none'",
+    ].join("; "));
+    res.set("Cache-Control", "no-store");
+    next();
+  });
+  app.use("/extension", express.static(path.join(__dirname, "..", "public", "extension"), {
+    index: false,
+    dotfiles: "deny",
+    redirect: false,
+    extensions: false,
+  }));
+  app.get("/extension/authorize", (req, res) => {
+    res.sendFile(path.join(__dirname, "..", "public", "extension", "authorize", "index.html"));
+  });
+
   app.use("/api/auth", authRoutes);
   app.use("/api/users", usersRoutes);
   app.use("/api/conversations", conversationRoutes);

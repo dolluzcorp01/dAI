@@ -68,6 +68,10 @@
     "https://dai.dolluzcorp.com/*"
   ],
 
+  "externally_connectable": {
+    "matches": ["https://dai.dolluzcorp.com/*"]
+  },
+
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; frame-ancestors 'none'"
   },

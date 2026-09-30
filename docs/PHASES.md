@@ -6,7 +6,7 @@ by a real person. PENDING = not started. Update this table at the end of every s
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Assemble the 15 modules, fill what they never shipped, pass the suite on real MySQL 8 + Redis | DONE |
-| 1 | Sign-in through dAdmin, the extension client (Ask Kody), SME loop with notifications, dAI admin pages in dAdmin | 1.1, 1.2, 1.3 DONE. 1.4a, 1.4b, 1.4c DONE. 1.4d next |
+| 1 | Sign-in through dAdmin, the extension client (Ask Kody), SME loop with notifications, dAI admin pages in dAdmin | 1.1, 1.2, 1.3 DONE. 1.4a-d DONE, awaiting the Chrome done-check. 1.5 is dAdmin |
 | 2 | Team chat, files with virus scan, search, notifications UI, daily digest by SendGrid | BUILT on the server, UI PENDING |
 | 3 | Chrome extension: packaging and the Web Store listing. The missing files and the real browser test moved into 1.4 | PENDING |
 | 4 | Production on DigitalOcean: droplet, managed MySQL, Spaces, Redis, ClamAV, Caddy, first real Claude call, CMS code import | PENDING |
@@ -153,6 +153,34 @@ by a real person. PENDING = not started. Update this table at the end of every s
          - NOT verified: no browser has rendered the panel. That is the 1.4 done-check.
     1.4d The sign-in page on the dAI host that hands the login back to the extension, from
          prototypes/kody_auth_flow_v11.jsx. It signs in with dAdmin credentials, as 1.1 does.
+         DONE 2026-09-30. server/public/extension/authorize/, plain static files served by the
+         API host at /extension/authorize, which is the URL beginSignIn already opened. The
+         v11 card: dark logo tile, the gold authorising strip, Work email and Password, the
+         gold button, the or divider with the two SSO buttons disabled and the prototype's own
+         note about them, Forgot password pointing at dAdmin, and the handoff screen.
+         Evidence: a new suite, signin-page.test.js, runs the page's OWN authorize.js in a
+         DOM written for the test against the real server: 11/11. extension.test.js 45/45.
+         FULL SUITE 572/572 TWICE. Five mutations caught, every file restored byte for byte:
+         the page returning to any https address, the password left in the page, a loosened
+         page CSP, a widened externally_connectable, and a fetch added to the side panel.
+         Learned along the way:
+         - 1.4c left the handoff hardcoded to production: shared/auth.js still had API_BASE
+           and SITE_BASE constants, so sign in ignored the configured server and 1.4d could
+           not have been tested locally at all. beginSignIn and completeSignIn now take the
+           bases, and the worker passes what config.js resolved. Production stays the default.
+         - externally_connectable was missing, so the worker's onMessageExternal branch, and
+           the whole tab fallback with it, was dead code. It names one https host, build.js
+           now fails on a wildcard there, and the worker still checks the origin itself.
+         - The page tests the callback against the RAW string, not the parsed host, because
+           new URL() lowercases a host and the server's allowlist does not. A page laxer than
+           the server it depends on is how an open redirect starts. A test asserts the two
+           agree, case for case.
+         - A stray 0x08 byte from a shell escape had been sitting in extension.test.js since
+           1.4c, inside /\bfetch\s*\(/. The regex was looking for a backspace character, so
+           "the panel never calls fetch" had been passing without checking anything. Repaired,
+           then proved by adding a fetch to the panel and watching it fail. All 140 tracked
+           text files are now scanned for control bytes and are clean.
+         - NOT verified: no browser has rendered this page either.
     Done-check for 1.4 as a whole, in a real Chrome: load the unpacked extension, sign in
     with a dAdmin password, click the bubble, ask CO-45 and a general question, thumbs down
     one, and see it reach the dAdmin SME queue. Screenshots of each step.

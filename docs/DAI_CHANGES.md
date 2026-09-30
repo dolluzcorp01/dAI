@@ -85,3 +85,16 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | `extension/src/popup/{index.html,popup.css,popup.js}` | `// dAI:` Server section | Where a developer points the extension at their own machine, including asking Chrome for the localhost host permission at the click. |
 | `extension/manifest.json` | `optional_host_permissions` for localhost and 127.0.0.1 | Chrome refuses a host the manifest never asked for, and a packed build must not hold a local host permission it was granted. |
 | `web/src/api/endpoints.js` | `// dAI:` added `notifications` | The badge and the bell had no endpoint wrapper. The list carries no message text unless the organisation opted in (rule 17). |
+
+## 1.4d - the sign in page (2026-09-30)
+
+| File | Change | Why |
+|---|---|---|
+| `server/public/extension/authorize/*` | new | The sign in page the extension has always opened, from prototype v11. Plain HTML, CSS and one ES module: no React app, no bundler. |
+| `server/src/app.js` | `// dAI:` serves `/extension` with its own CSP | The only page this API serves, and the only place a Kody password is typed. `default-src 'none'`, script and style from this origin, `frame-ancestors 'none'`, `Cache-Control: no-store`. |
+| `extension/src/shared/auth.js` | `// dAI:` `beginSignIn` takes `siteBase` | It built the sign in URL from a constant, so the handoff ignored a configured local server. Production stays the default, so nothing that omits it changes. |
+| `extension/src/background/service-worker.js` | passes the resolved bases into `beginSignIn` and `completeSignIn` | The whole flow, sign in page included, now follows the configured server. |
+| `extension/manifest.json` | `externally_connectable` for the Dolluz site | Without it `onMessageExternal` never fires, so the worker's tab fallback was dead code. One https host, never a wildcard. |
+| `extension/build.js` | `// dAI:` rejects a wildcard in `externally_connectable` | That key decides which sites may talk to the worker at all. |
+| `extension/src/popup/index.html` | placeholder now `http://localhost:4014` for both | The sign in page is served by the API host, so both bases are the same host in development too. |
+| `server/tests/extension.test.js` | repaired `/\bfetch\s*\(/` | A 0x08 byte from a shell escape had replaced the `\b`, so the check had been passing without testing anything since 1.4c. |

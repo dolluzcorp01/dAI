@@ -11,6 +11,10 @@
  * that runs in the page's world, where any script on the page could read them.
  */
 
+// dAI: production stays the default here, so nothing that calls these without
+// a base changes behaviour. The worker passes the configured bases instead
+// (shared/config.js, docs/PHASES.md 1.4c), which is how a developer points the
+// whole flow, sign in page included, at a local server.
 export const API_BASE = "https://dai.dolluzcorp.com";
 export const SITE_BASE = "https://dai.dolluzcorp.com";
 
@@ -56,11 +60,13 @@ export async function isSignedIn(storage = chrome.storage.local) {
  * Step one. Generate a state value, remember it, and return the URL to open.
  * The site signs the person in and redirects back with a code.
  */
-export async function beginSignIn({ storage = chrome.storage.local, redirectUri } = {}) {
+export async function beginSignIn({
+  storage = chrome.storage.local, redirectUri, siteBase = SITE_BASE,
+} = {}) {
   const state = randomState();
   await storage.set({ [KEY_STATE]: { state, createdAt: Date.now() } });
 
-  const url = new URL(`${SITE_BASE}/extension/authorize`);
+  const url = new URL(`${siteBase}/extension/authorize`);
   url.searchParams.set("state", state);
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("surface", "extension");

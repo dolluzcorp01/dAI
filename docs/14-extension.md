@@ -24,6 +24,8 @@ extension/
   src/content/bubble.css
   src/sidepanel/               where answers are actually rendered
   src/popup/                   sign in, sign out, open
+
+server/public/extension/authorize/   the sign in page, served by the API host
 ```
 
 No bundler on purpose. Plain ES modules that Chrome loads directly, so what you
@@ -112,6 +114,7 @@ terminal failure just loops.
 | `identity` | **optional**, requested only when signing in |
 | host: `https://dai.dolluzcorp.com/*` | our own API, nothing else |
 | host: `http://localhost/*`, `http://127.0.0.1/*` | **optional**, development only, requested from the popup when a developer points the extension at their own machine |
+| `externally_connectable`: `https://dai.dolluzcorp.com/*` | the sign in page hands the code back this way when the flow ran in an ordinary tab. One host, never a wildcard, and the worker checks the origin again before it accepts |
 
 Not asked for: `<all_urls>`, `tabs`, `webRequest`, `cookies`, `management`.
 The content script matches all http and https pages because the bubble has to
@@ -129,13 +132,17 @@ review risk.
 | Static safety | no eval or `new Function`, no remote script, no `innerHTML` in the panel or bubble, no inline script or handlers in the HTML, content script never touches a token, worker refuses a token to a tab, external messages only from the Dolluz origin, links restricted to http and https, state from `crypto` |
 | Handoff | distinct state every time, state stored and URL built, real code exchanged for real tokens, no token in the redirect, code not reusable, unlisted extension refused, state mismatch refused without a network call, expired state refused, refusal surfaced |
 | Where it points | production with nothing configured, production when storage itself fails, a local server accepted and reported as not production, plain http refused for every host but this machine, both bases required together, clearing returns to production, the manifest holds localhost only as an optional host |
+| Sign in page | shows a password field only for a real extension callback and refuses seven hostile ones, refuses a missing or trivial state, agrees with the server's own allowlist case for case, a correct password returns a code that exchanges for real tokens and cannot be used twice, a wrong password says so and hands nothing back, the password is cleared from the page either way, forgot password points at dAdmin without revealing whether the account exists, the page is served with its own strict policy and no-store, its assets are served and a directory listing is not, and it persists nothing |
 | Side panel | the four tabs of the prototype with Chats marked Phase 2, the codes strip, the points wallet and the feedback buttons present, the panel holds no token and never calls `fetch`, every message it sends has a case in the worker, every API case in the worker checks the session, the vendored SDK is byte for byte web/src/api |
 | Refresh | rotates and stores the pair, ten concurrent refreshes make one call and the session survives, a revoked token clears storage, `apiFetch` recovers from a corrupt access token |
 
-Five mutations were run: accepting any `chromiumapp.org` host, skipping the
-state check, drifting the vendored SDK, letting plain http point anywhere, and
-dropping the session check from `kody:points`. All five were caught, and each
-file was restored byte for byte.
+Ten mutations have been run against this suite: accepting any
+`chromiumapp.org` host, skipping the state check, drifting the vendored SDK,
+letting plain http point anywhere, dropping the session check from
+`kody:points`, adding a `fetch` to the side panel, letting the sign in page
+return to any https address, leaving the password in the page, loosening the
+page's content security policy, and widening `externally_connectable` to
+`https://*/*`. All ten were caught, and every file was restored byte for byte.
 
 ---
 
@@ -148,6 +155,9 @@ against the real server with a fake `chrome.storage`.
 What that leaves unproven:
 
 - Whether the bubble renders correctly, or at all, on a real page.
+- Whether the sign in page looks like the prototype, or renders at all. Its
+  own JavaScript is driven against the real server in a DOM written for the
+  test, which proves what it does, not what it looks like.
 - Whether the side panel looks like the prototype. Its HTML and CSS have never
   been rendered. Ask, Saved, History, the codes strip and the wallet are wired
   to the worker and statically checked, and nothing more than that.
@@ -186,6 +196,38 @@ To use a local server: open the popup, expand **Server**, enter
 server**. Chrome asks for the host permission at that click, since localhost is
 optional and a packed build never holds it. Sign in again afterwards; the old
 tokens belong to the old server.
+
+---
+
+## The sign in page
+
+A Kody password is typed in exactly one place: `/extension/authorize` on the
+dAI host, served as plain static files by the API server. The extension opens
+it with a state value it generated and the callback it wants the code sent to,
+and never sees the password at all.
+
+The page checks the callback before it draws a password field. It uses the
+same expression as `isAllowedRedirect` in `server/src/lib/tokens.js`, tested
+against the raw string rather than the parsed host, because `new URL()`
+lowercases a host and the server's allowlist does not: a page that is laxer
+than the server it depends on is how an open redirect starts. The server
+remains the authority and will refuse to mint a code for anything else, but a
+password should not be typed into a page with nowhere legitimate to send the
+result.
+
+The code goes back one of two ways. Normally the page redirects to the
+extension's callback, which Chrome's sign in window catches. Where the flow was
+opened as an ordinary tab, that redirect would land nowhere, so the page posts
+the code to the extension directly; that is why `externally_connectable` names
+the site, and the worker checks the origin again before accepting.
+
+The page is served with its own policy: `default-src 'none'` with script and
+style from this origin only, `frame-ancestors 'none'` because it carries a
+password field, and `Cache-Control: no-store`. It stores nothing, in any form.
+
+Passwords belong to dAdmin (docs/PHASES.md 1.1), so Forgot password asks the
+server, which answers the same way for every address and cannot be used to find
+out who has an account.
 
 ---
 
