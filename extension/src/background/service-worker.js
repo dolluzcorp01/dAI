@@ -19,7 +19,7 @@ import {
 // dAI: every API call goes through the SDK (docs/PHASES.md 1.4c), and every one
 // of them happens here, so token refresh has exactly one home.
 import { kodyApi, resetApi } from "../shared/api.js";
-import { endpoints, setEndpoints, clearEndpoints } from "../shared/config.js";
+import { endpoints, setEndpoints, clearEndpoints, matchPattern } from "../shared/config.js";
 
 const SIDE_PANEL_PATH = "src/sidepanel/index.html";
 
@@ -57,7 +57,21 @@ async function signIn() {
     : `https://${chrome.runtime.id}.chromiumapp.org/kody`;
 
   resetApi();                      // dAI: endpoints may have changed since the last call
-  const { siteBase, apiBase } = await endpoints();
+  const { siteBase, apiBase, isProduction } = await endpoints();
+
+  // dAI: Chrome will not let the worker fetch a host the extension has not been
+  // granted, and localhost is optional so a packed build never holds it. Check
+  // before starting: otherwise the person signs in, a code is minted, and the
+  // exchange fails with a bare network error that explains nothing.
+  if (!isProduction && !(await hasHostAccess(apiBase, siteBase))) {
+    return {
+      ok: false,
+      error: "host_permission",
+      message: `Chrome has not granted Kody access to ${apiBase}. `
+        + "Open Server in the popup and click Use this server.",
+    };
+  }
+
   const { url } = await beginSignIn({ redirectUri, siteBase });
 
   // launchWebAuthFlow gives us the redirect without leaving a tab behind.
@@ -87,6 +101,17 @@ async function signIn() {
   }
   await chrome.tabs.create({ url });
   return { ok: false, error: "manual", message: "Finish signing in on the Dolluz tab." };
+}
+
+/** Does Chrome let us talk to these bases at all? */
+async function hasHostAccess(...bases) {
+  const origins = [...new Set(bases.map(matchPattern).filter(Boolean))];
+  if (origins.length === 0) return false;
+  try {
+    return await chrome.permissions.contains({ origins });
+  } catch (_) {
+    return false;                  // cannot ask: treat as not granted
+  }
 }
 
 /**
@@ -247,7 +272,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
 
       case "kody:endpoints": {
-        sendResponse({ ok: true, ...(await endpoints()) });
+        const where = await endpoints();
+        sendResponse({
+          ok: true, ...where,
+          hostAccess: where.isProduction || await hasHostAccess(where.apiBase, where.siteBase),
+        });
         return;
       }
 

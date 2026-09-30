@@ -32,6 +32,19 @@ export function cleanBase(value) {
   return null;
 }
 
+/**
+ * The Chrome match pattern for a base, which is what permissions.request and
+ * permissions.contains take. A match pattern may NOT carry a port, so
+ * http://localhost:4014 becomes http://localhost/*, which covers every port on
+ * that host. Passing the port makes Chrome reject the whole call.
+ */
+export function matchPattern(base) {
+  const clean = cleanBase(base);
+  if (!clean) return null;
+  const url = new URL(clean);
+  return `${url.protocol}//${url.hostname}/*`;
+}
+
 export async function endpoints(storage = chrome.storage.local) {
   let stored = null;
   try {

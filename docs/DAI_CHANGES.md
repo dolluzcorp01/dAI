@@ -114,3 +114,11 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 |---|---|---|
 | `server/src/services/auth.service.js` | `// dAI:` `resolveUser` extracted from `login`, and `authorize` now calls it | 1.1 put dAdmin in front of `login` and missed `authorize`, which the sign in page uses. `authorize` checked local Kody credentials only, and a real employee has none, so the extension could not sign anyone in. Found on the first done-check attempt with a real dAdmin account. |
 | `server/tests/dadmin.test.js` | four tests for the handoff | An employee with no local password gets a code and swaps it for a session, the Kody user is created and linked by emp_id, a wrong password mints nothing, and `app_dAI = 0` is refused here as well as on the site. |
+
+## Sign in says when Chrome has not granted the host (2026-09-30)
+
+| File | Change | Why |
+|---|---|---|
+| `extension/src/shared/config.js` | `matchPattern()` | One place that knows a Chrome match pattern carries no port. The popup and the worker both use it. |
+| `extension/src/background/service-worker.js` | `// dAI:` checks the host permission before starting sign in, and reports it over `kody:endpoints` | Without it the person signs in, the server mints a code, and the exchange fails with a bare network error. The evidence is an unconsumed row in `auth_codes` and a message that explains nothing. |
+| `extension/src/popup/popup.js` | the Server line says when access has not been granted | The state that decides whether sign in can work was invisible. |

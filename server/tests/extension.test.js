@@ -330,13 +330,29 @@ describe("where the extension talks to", () => {
   test("the host permission it asks for is a valid match pattern", () => {
     // Chrome rejects a match pattern that carries a port, and the manifest's
     // optional host is http://localhost/*, which covers every port anyway.
-    const popup = readExt("src/popup/popup.js");
-    assert.ok(!/\$\{new URL\(b\)\.origin\}\/\*/.test(popup),
-      "an origin carries a port, which is not a valid match pattern");
-    assert.match(popup, /\$\{u\.protocol\}\/\/\$\{u\.hostname\}\/\*/);
+    assert.equal(config.matchPattern("http://localhost:4014"), "http://localhost/*");
+    assert.equal(config.matchPattern("http://127.0.0.1:3000/"), "http://127.0.0.1/*");
+    assert.equal(config.matchPattern("https://dai.dolluzcorp.com"), "https://dai.dolluzcorp.com/*");
+    assert.equal(config.matchPattern("http://evil.example.com"), null, "not a base we would accept");
+    assert.equal(config.matchPattern("nonsense"), null);
     for (const host of manifest.optional_host_permissions) {
       assert.ok(!/:\d+/.test(host), `${host} carries a port`);
     }
+    assert.ok(!/\$\{new URL\([a-z]+\)\.origin\}\/\*/.test(readExt("src/popup/popup.js")),
+      "an origin carries a port, which is not a valid match pattern");
+  });
+
+  test("sign in stops before minting a code Chrome will not let it redeem", () => {
+    // The failure this prevents: the person signs in, the server mints a code,
+    // and the exchange fails with a bare network error, leaving an unconsumed
+    // code and no explanation.
+    const worker = readExt("src/background/service-worker.js");
+    const check = worker.indexOf("hasHostAccess(apiBase, siteBase)");
+    const begin = worker.indexOf("beginSignIn(");
+    assert.ok(check > 0, "sign in never checks whether Chrome granted the host");
+    assert.ok(check < begin, "it checks after opening the sign in window, which is too late");
+    assert.match(worker, /host_permission/);
+    assert.match(worker, /permissions\.contains/);
   });
 
   test("changing server drops the tokens the old one issued", () => {

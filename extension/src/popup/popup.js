@@ -11,6 +11,8 @@
  * Everything is built with textContent, so nothing here can render markup that
  * came back from the network.
  */
+import { matchPattern } from "../shared/config.js";
+
 const $ = (id) => document.getElementById(id);
 
 const send = (message) =>
@@ -144,7 +146,8 @@ async function paintWhere() {
   if (!where.ok) return;
   $("where").textContent = where.isProduction
     ? "Production. Dolluz."
-    : `Development. ${where.apiBase}`;
+    : `Development. ${where.apiBase}`
+      + (where.hostAccess ? "" : " Chrome has not granted access to it yet.");
   $("api-base").value = where.isProduction ? "" : where.apiBase;
   $("site-base").value = where.isProduction ? "" : where.siteBase;
 }
@@ -160,14 +163,8 @@ $("dev-use").addEventListener("click", async () => {
   try {
     // A Chrome match pattern has no port: http://localhost:4014/* is rejected as
     // invalid, and http://localhost/* covers every port on the host anyway.
-    const origins = [apiBase, siteBase]
-      .map(b => {
-        try {
-          const u = new URL(b);
-          return `${u.protocol}//${u.hostname}/*`;
-        } catch (_) { return null; }
-      })
-      .filter(o => o && o.startsWith("http://"));
+    const origins = [...new Set([apiBase, siteBase].map(matchPattern).filter(Boolean))]
+      .filter(o => o.startsWith("http://"));
     if (origins.length > 0) {
       const granted = await chrome.permissions.request({ origins: [...new Set(origins)] });
       if (!granted) { note("Chrome did not grant access to that server."); return; }
