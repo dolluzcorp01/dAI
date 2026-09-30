@@ -62,8 +62,28 @@ async function paint() {
 
 /* ---------------- actions ---------------- */
 
+/**
+ * dAI: identity is an optional permission, so chrome.identity does not exist
+ * until someone grants it. Chrome will only grant it from a user gesture, and
+ * a click on this button is one. Asking here, rather than in the worker, is
+ * the difference between a sign in window opening and nothing happening.
+ */
+async function ensureIdentity() {
+  try {
+    if (await chrome.permissions.contains({ permissions: ["identity"] })) return true;
+    return await chrome.permissions.request({ permissions: ["identity"] });
+  } catch (_) {
+    return false;
+  }
+}
+
 $("sign-in").addEventListener("click", async () => {
   const button = $("sign-in");
+  fail("");
+  if (!(await ensureIdentity())) {
+    fail("Kody needs permission to open the Dolluz sign in window. Click Continue and allow it.");
+    return;
+  }
   button.disabled = true;
   button.textContent = "Opening Dolluz...";
   const out = await send({ type: "kody:sign-in" });

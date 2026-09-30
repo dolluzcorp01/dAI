@@ -181,6 +181,11 @@ by a real person. PENDING = not started. Update this table at the end of every s
            then proved by adding a fetch to the panel and watching it fail. All 140 tracked
            text files are now scanned for control bytes and are clean.
          - NOT verified: no browser has rendered this page either.
+         Preparing the done-check found one more, again before any browser ran: identity is
+         an optional permission, so chrome.identity does not exist until it is granted and
+         Chrome only grants it from a user gesture. Both sign in buttons now ask on the
+         click, and the worker's tab fallback refuses against a local server instead of
+         opening a tab that cannot finish. Full suite 573/573 twice.
     Done-check for 1.4 as a whole, in a real Chrome: load the unpacked extension, sign in
     with a dAdmin password, click the bubble, ask CO-45 and a general question, thumbs down
     one, and see it reach the dAdmin SME queue. Screenshots of each step.

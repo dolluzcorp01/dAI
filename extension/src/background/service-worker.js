@@ -73,7 +73,18 @@ async function signIn() {
     }
   }
 
-  // Fallback: open a tab and wait for the site to hand the code back.
+  // Fallback: open a tab and wait for the site to hand the code back. This only
+  // completes on the production site, which is the one externally_connectable
+  // names; against a local server there is nothing to receive the code, so say
+  // so rather than leave a tab sitting there.
+  const { isProduction } = await endpoints();
+  if (!isProduction) {
+    return {
+      ok: false,
+      error: "identity_required",
+      message: "Allow Kody the identity permission to sign in against a local server.",
+    };
+  }
   await chrome.tabs.create({ url });
   return { ok: false, error: "manual", message: "Finish signing in on the Dolluz tab." };
 }

@@ -418,6 +418,12 @@ $("input").addEventListener("keydown", (event) => {
 });
 
 $("signin-btn").addEventListener("click", async () => {
+  // dAI: identity is optional, and Chrome only grants it from a gesture.
+  try {
+    const held = await chrome.permissions.contains({ permissions: ["identity"] });
+    if (!held && !(await chrome.permissions.request({ permissions: ["identity"] }))) return;
+  } catch (_) { /* older Chrome: fall through and let the worker try */ }
+
   const out = await send({ type: "kody:sign-in" });
   if (out.ok) {
     showSignIn(false);

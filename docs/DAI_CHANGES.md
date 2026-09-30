@@ -98,3 +98,10 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | `extension/build.js` | `// dAI:` rejects a wildcard in `externally_connectable` | That key decides which sites may talk to the worker at all. |
 | `extension/src/popup/index.html` | placeholder now `http://localhost:4014` for both | The sign in page is served by the API host, so both bases are the same host in development too. |
 | `server/tests/extension.test.js` | repaired `/\bfetch\s*\(/` | A 0x08 byte from a shell escape had replaced the `\b`, so the check had been passing without testing anything since 1.4c. |
+
+## 1.4 done-check preparation (2026-09-30)
+
+| File | Change | Why |
+|---|---|---|
+| `extension/src/popup/popup.js`, `extension/src/sidepanel/sidepanel.js` | `// dAI:` ask for the `identity` permission on the sign in click | `identity` is optional, so `chrome.identity` does not exist until it is granted, and Chrome only grants it from a user gesture. Asking in the worker is too late: the click has already ended. Found while preparing the Chrome done-check, before a browser had run any of it. |
+| `extension/src/background/service-worker.js` | `// dAI:` the tab fallback refuses against a local server | That path can only complete on the production site, which is the one `externally_connectable` names. Opening a tab that cannot finish is worse than saying so. |

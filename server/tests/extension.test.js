@@ -309,6 +309,24 @@ describe("where the extension talks to", () => {
     }
   });
 
+  test("both sign in buttons ask for the identity permission first", () => {
+    // identity is optional, so chrome.identity does not exist until it is
+    // granted, and Chrome only grants it from a user gesture. Asking in the
+    // worker would be too late: the click has already ended.
+    const popup = readExt("src/popup/popup.js");
+    const panel = readExt("src/sidepanel/sidepanel.js");
+    for (const [name, src] of [["popup", popup], ["panel", panel]]) {
+      assert.match(src, /permissions\.request\(\{ permissions: \["identity"\] \}\)/,
+        `${name} never asks for the identity permission`);
+      const at = src.indexOf("permissions.request");
+      const signIn = src.indexOf('"kody:sign-in"');
+      assert.ok(at > 0 && at < signIn, `${name} asks after it has already tried to sign in`);
+    }
+    assert.ok(manifest.optional_permissions.includes("identity"));
+    assert.ok(!manifest.permissions.includes("identity"),
+      "identity should stay optional, so a fresh install asks for nothing");
+  });
+
   test("the sign in URL follows the configured server, not a constant", () => {
     const worker = readExt("src/background/service-worker.js");
     assert.match(worker, /beginSignIn\(\{ redirectUri, siteBase \}\)/,
