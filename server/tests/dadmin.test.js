@@ -241,6 +241,66 @@ describe("signing in with dAdmin credentials", () => {
   });
 });
 
+describe("the extension handoff signs in the same way the site does", () => {
+  const CALLBACK = "http://localhost:3000/auth/callback";   // the allowlisted test redirect
+
+  test("an employee with no local Kody password gets a code", async () => {
+    // This is every real person: their password lives in dadmin, and they have
+    // no local Kody password at all. When authorize only checked local
+    // credentials, they could sign in on the site and not in the extension.
+    const emp = employee({ accessLevel: "Admin" });
+    const out = await api("POST", "/api/auth/authorize", {
+      email: emp.email, password: DADMIN_PASSWORD,
+      state: "handoff-state-0001", redirect_uri: CALLBACK, surface: "extension",
+    });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.ok(out.body.code, "no code issued");
+
+    const local = await db.one(
+      "SELECT c.password_hash FROM users u LEFT JOIN user_credentials c ON c.user_id = u.id WHERE u.email = ?",
+      [emp.email]
+    );
+    assert.ok(local && !local.password_hash, "this user is supposed to have no local password");
+
+    const swap = await api("POST", "/api/auth/token",
+      { code: out.body.code, state: "handoff-state-0001" });
+    assert.equal(swap.status, 200, JSON.stringify(swap.body));
+    assert.equal(swap.body.user.email, emp.email);
+  });
+
+  test("the Kody user is created and linked by emp_id, as on the site", async () => {
+    const emp = employee({ accessLevel: "Sub Admin" });
+    const out = await api("POST", "/api/auth/authorize", {
+      email: emp.email, password: DADMIN_PASSWORD,
+      state: "handoff-state-0002", redirect_uri: CALLBACK, surface: "extension",
+    });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const user = await db.one("SELECT id, emp_id FROM users WHERE email = ?", [emp.email]);
+    assert.equal(user.emp_id, emp.empId);
+    assert.deepEqual(await rolesOf(user.id), ["sub_admin"]);
+  });
+
+  test("a wrong password is refused, and no code is minted", async () => {
+    const emp = employee();
+    const out = await api("POST", "/api/auth/authorize", {
+      email: emp.email, password: "not the password",
+      state: "handoff-state-0003", redirect_uri: CALLBACK, surface: "extension",
+    });
+    assert.equal(out.status, 401);
+    assert.ok(!out.body.code);
+  });
+
+  test("app_dAI = 0 is refused here too, not only on the site", async () => {
+    const emp = employee({ appDai: 0 });
+    const out = await api("POST", "/api/auth/authorize", {
+      email: emp.email, password: DADMIN_PASSWORD,
+      state: "handoff-state-0004", redirect_uri: CALLBACK, surface: "extension",
+    });
+    assert.equal(out.status, 403);
+    assert.ok(!out.body.code);
+  });
+});
+
 describe("local Kody passwords", () => {
   test("still work in development for a user dAdmin does not have", async () => {
     const r = await api("POST", "/api/auth/login",

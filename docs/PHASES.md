@@ -181,6 +181,11 @@ by a real person. PENDING = not started. Update this table at the end of every s
            then proved by adding a fetch to the panel and watching it fail. All 140 tracked
            text files are now scanned for control bytes and are clean.
          - NOT verified: no browser has rendered this page either.
+         The first done-check attempt found the one that mattered: 1.1 put dAdmin in front of
+         login and missed authorize, which is what the sign in page calls. authorize checked
+         local Kody credentials only, and a real employee has none, so the extension could
+         not sign anyone in. Both now go through one resolveUser. Four tests cover the
+         handoff, and putting the bug back fails three of them. Full suite 579/579 twice.
          Preparing the done-check found one more, again before any browser ran: identity is
          an optional permission, so chrome.identity does not exist until it is granted and
          Chrome only grants it from a user gesture. Both sign in buttons now ask on the

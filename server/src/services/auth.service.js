@@ -135,7 +135,16 @@ async function issueSession(userId, surface, ctx = {}) {
  * Kody password is only a development and test convenience, so production
  * refuses it: there, dadmin is the only way in.
  */
-async function login({ email, password, surface = "web" }, ctx = {}) {
+/**
+ * dAI: the one way in, for every surface (docs/PHASES.md 1.1).
+ *
+ * dadmin first, because that is where real people's credentials live. A local
+ * Kody password is a development and test convenience only, so production
+ * refuses it. Both the web login and the extension handoff call this: when
+ * only login did, a real employee could sign in on the site but not through
+ * the extension, because they have no local password at all.
+ */
+async function resolveUser(email, password, ctx = {}) {
   let user = null;
   try {
     user = await dadmin.signIn(email, password);
@@ -159,6 +168,11 @@ async function login({ email, password, surface = "web" }, ctx = {}) {
     }
     user = await authenticate(email, password, ctx);
   }
+  return user;
+}
+
+async function login({ email, password, surface = "web" }, ctx = {}) {
+  const user = await resolveUser(email, password, ctx);
 
   const tokens = await issueSession(user.id, surface, ctx);
   return { user: { id: user.id, email: user.email, fullName: user.fullName }, ...tokens };
@@ -177,7 +191,7 @@ async function authorize({ email, password, state, redirectUri, surface = "exten
   if (!T.isAllowedRedirect(redirectUri)) {
     throw new AuthError(400, "bad_redirect_uri", "This redirect URI is not allowed.");
   }
-  const user = await authenticate(email, password, ctx);
+  const user = await resolveUser(email, password, ctx);   // dAI: dadmin first, as login does
   const code = T.newAuthCode();
 
   await db.query(

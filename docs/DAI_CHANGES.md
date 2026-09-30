@@ -107,3 +107,10 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | `extension/src/background/service-worker.js` | `// dAI:` the tab fallback refuses against a local server | That path can only complete on the production site, which is the one `externally_connectable` names. Opening a tab that cannot finish is worse than saying so. |
 | `extension/src/popup/popup.js` | `// dAI:` the requested host pattern drops the port | A Chrome match pattern may not carry a port, so `http://localhost:4014/*` is rejected as invalid and the request throws. `http://localhost/*` covers every port on the host. |
 | `extension/src/background/service-worker.js` | `// dAI:` changing server clears the tokens | A token belongs to the server that issued it. Keeping one across a change looks signed in and fails on the first call. |
+
+## The extension handoff never asked dAdmin (2026-09-30)
+
+| File | Change | Why |
+|---|---|---|
+| `server/src/services/auth.service.js` | `// dAI:` `resolveUser` extracted from `login`, and `authorize` now calls it | 1.1 put dAdmin in front of `login` and missed `authorize`, which the sign in page uses. `authorize` checked local Kody credentials only, and a real employee has none, so the extension could not sign anyone in. Found on the first done-check attempt with a real dAdmin account. |
+| `server/tests/dadmin.test.js` | four tests for the handoff | An employee with no local password gets a code and swaps it for a session, the Kody user is created and linked by emp_id, a wrong password mints nothing, and `app_dAI = 0` is refused here as well as on the site. |
