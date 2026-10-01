@@ -5,6 +5,7 @@ const knowledge = require("../services/knowledge.service");
 const codeimport = require("../services/codeimport.service");
 const { ValidationError } = require("../lib/validate");
 const { authenticate, requireRole } = require("../middleware/auth");
+const { logError } = require("../lib/safe-error");   // dAI: never log an error object (PHI in err.sql)
 
 const router = express.Router();
 router.use(authenticate);
@@ -24,7 +25,7 @@ function handle(res, err) {
   if (err && err.status && err.code) {
     return res.status(err.status).json({ error: err.code, message: err.message });
   }
-  console.error("knowledge error:", err);
+  logError("knowledge error:", err);
   return res.status(500).json({ error: "server_error", message: "Something went wrong." });
 }
 const wrap = (fn) => async (req, res) => { try { await fn(req, res); } catch (e) { handle(res, e); } };

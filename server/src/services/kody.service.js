@@ -522,8 +522,60 @@ async function pointsBalance(userId) {
 
 /* ---------------- SME queue ---------------- */
 
-async function smeQueue({ status = "open", limit = 50 } = {}) {
+/**
+ * dAI: a day boundary from a date, so from and to mean whole days.
+ *
+ * Accepts YYYY-MM-DD, which is what a date picker sends, or a full timestamp.
+ * A bare `to` covers the whole of that day, because asking for items up to the
+ * 3rd and getting nothing from the 3rd is a trap.
+ */
+function queueBoundary(value, field, { endOfDay = false } = {}) {
+  const text = String(value).trim();
+  const bare = /^\d{4}-\d{2}-\d{2}$/.test(text);
+  if (!bare && !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(text)) {
+    throw new KodyError(400, "bad_date", `${field} must be a date, as YYYY-MM-DD.`);
+  }
+  const at = new Date(bare ? `${text}T00:00:00` : text.replace(" ", "T"));
+  if (Number.isNaN(at.getTime())) {
+    throw new KodyError(400, "bad_date", `${field} is not a real date.`);
+  }
+  if (bare && endOfDay) at.setDate(at.getDate() + 1);   // exclusive upper bound
+  return { at, exclusive: bare && endOfDay };
+}
+
+/**
+ * The SME queue.
+ *
+ * dAI: newest first by default, and filterable by date. It used to be oldest
+ * first with no dates at all, which is fine with five open items and useless
+ * with fifty: the thing an expert wants is what came in today, and that was the
+ * one thing the list could not show them.
+ *
+ * created_at alone is not a stable order, because two items raised in the same
+ * second would swap between pages. id breaks the tie, in the same direction.
+ */
+async function smeQueue({ status = "open", limit = 50, order = "newest", from, to } = {}) {
   const lim = Math.min(Math.max(Number(limit) || 50, 1), 200);
+
+  // Not a bound parameter: a direction cannot be one. So it is a whitelist.
+  const direction = { newest: "DESC", oldest: "ASC" }[String(order || "newest")];
+  if (!direction) {
+    throw new KodyError(400, "bad_order", "order must be newest or oldest.");
+  }
+
+  const where = ["q.status = ?"];
+  const params = [status];
+  if (from !== undefined && from !== null && from !== "") {
+    where.push("q.created_at >= ?");
+    params.push(queueBoundary(from, "from").at);
+  }
+  if (to !== undefined && to !== null && to !== "") {
+    const bound = queueBoundary(to, "to", { endOfDay: true });
+    where.push(bound.exclusive ? "q.created_at < ?" : "q.created_at <= ?");
+    params.push(bound.at);
+  }
+  params.push(lim);
+
   const [rows] = await db.query(
     `SELECT q.id, q.status, q.created_at AS createdAt, q.assigned_to AS assignedTo,
             m.id AS kodyMessageId, m.body AS answerBody, m.domain, m.confidence,
@@ -535,9 +587,9 @@ async function smeQueue({ status = "open", limit = 50 } = {}) {
        FROM sme_queue q
        JOIN kody_messages m ON m.id = q.kody_message_id
        LEFT JOIN users u ON u.id = q.raised_by
-      WHERE q.status = ?
-      ORDER BY q.created_at LIMIT ?`,
-    [status, lim]
+      WHERE ${where.join(" AND ")}
+      ORDER BY q.created_at ${direction}, q.id ${direction} LIMIT ?`,
+    params
   );
   return rows;
 }

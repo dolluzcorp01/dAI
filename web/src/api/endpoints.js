@@ -158,7 +158,9 @@ export function createApi(client) {
       points: () => client.get("/api/kody/points"),
       lookupCode: (code) => client.get(`/api/kody/codes/${encodeURIComponent(code)}`).then(r => r.entries),
       searchCodes: (q, set) => client.get("/api/kody/codes", { query: { q, set } }).then(r => r.results),
-      smeQueue: (status = "open") => client.get("/api/kody/sme", { query: { status } }).then(r => r.items),
+      // dAI: newest first by default, with an optional date window.
+      smeQueue: (status = "open", { order, from, to, limit } = {}) =>
+        client.get("/api/kody/sme", { query: { status, order, from, to, limit } }).then(r => r.items),
       resolveSme: (id, payload) => client.post(`/api/kody/sme/${id}/resolve`, payload),
     },
 

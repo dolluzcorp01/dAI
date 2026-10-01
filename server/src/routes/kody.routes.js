@@ -12,6 +12,7 @@ const kody = require("../services/kody.service");
 const codes = require("../services/codes.service");
 const { ValidationError } = require("../lib/validate");
 const { authenticate, requireRole, rateLimit } = require("../middleware/auth");
+const { logError } = require("../lib/safe-error");   // dAI: never log an error object (PHI in err.sql)
 
 const router = express.Router();
 router.use(authenticate);
@@ -23,7 +24,7 @@ function handle(res, err) {
   if (err && err.status && err.code) {
     return res.status(err.status).json({ error: err.code, message: err.message });
   }
-  console.error("kody error:", err);
+  logError("kody error:", err);
   return res.status(500).json({ error: "server_error", message: "Something went wrong." });
 }
 const wrap = (fn) => async (req, res) => { try { await fn(req, res); } catch (e) { handle(res, e); } };
@@ -93,10 +94,20 @@ router.get("/codes/:code", wrap(async (req, res) => {
   res.json({ entries });
 }));
 
-/* GET /api/kody/sme?status=open */
+/* GET /api/kody/sme?status=open&order=newest&from=2026-10-01&to=2026-10-01
+   dAI: order and the date window, so an expert can find today's items in a
+   queue with fifty open ones (docs/PHASES.md 1.3). */
 router.get("/sme", sme, wrap(async (req, res) => {
   const status = ["open", "resolved"].includes(req.query.status) ? req.query.status : "open";
-  res.json({ items: await kody.smeQueue({ status, limit: req.query.limit }) });
+  res.json({
+    items: await kody.smeQueue({
+      status,
+      limit: req.query.limit,
+      order: req.query.order === undefined ? "newest" : req.query.order,
+      from: req.query.from,
+      to: req.query.to,
+    }),
+  });
 }));
 
 /* POST /api/kody/sme/:id/resolve */

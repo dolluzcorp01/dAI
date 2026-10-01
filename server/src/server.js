@@ -5,6 +5,7 @@ const config = require("./config");
 const { pool } = require("./db");
 const { attachRealtime } = require("./realtime/gateway");
 const { createRedisAdapter, closeRedis } = require("./realtime/redis");
+const { logError } = require("./lib/safe-error");   // dAI: never log an error object (PHI in err.sql)
 
 async function main() {
   // With REDIS_URL set, every instance shares Socket.IO rooms. Without it the
@@ -29,4 +30,4 @@ async function main() {
   process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
-main().catch((err) => { console.error("failed to start:", err); process.exit(1); });
+main().catch((err) => { logError("failed to start:", err); process.exit(1); });

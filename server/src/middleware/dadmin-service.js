@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const db = require("../db");
 const config = require("../config");
 const dadmin = require("../services/dadmin.service");
+const { logError } = require("../lib/safe-error");   // dAI: never log an error object (PHI in err.sql)
 
 /**
  * Service tokens from the dAdmin console (docs/PHASES.md 1.2).
@@ -131,7 +132,7 @@ async function dadminService(req, res, next) {
 /** Express swallows a rejected promise, so wrap it and answer with a 500 instead. */
 function dadminServiceMiddleware(req, res, next) {
   dadminService(req, res, next).catch((err) => {
-    console.error("dAdmin service auth failed:", err);
+    logError("dAdmin service auth failed:", err);
     res.status(500).json({ error: "server_error", message: "Something went wrong." });
   });
 }

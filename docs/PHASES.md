@@ -231,6 +231,12 @@ by a real person. PENDING = not started. Update this table at the end of every s
 1.5 dAdmin dAI pages (separate repo, see PROMPT_dAdmin.md)
 
 ## Known gaps carried forward (do not lose these)
+- exchangeCode issues a session from the one-time code without re-checking dAdmin. Found in
+  the 1.4 audit on 2026-10-01. The window is the code's sixty second life, and every refresh
+  after that re-checks dAdmin and revokes on access_revoked (1.1), so an employee whose
+  app_dAI is turned off between signing in on the page and the extension redeeming the code
+  gets a session that dies at the first refresh. Narrow, but it is the only gap left in the
+  sign-in path. Phase 4: re-check in exchangeCode, or bind the check into the code row.
 - Extension: popup HTML/JS, side panel HTML, bubble.css, icons. Moved from Phase 3 into 1.4b.
 - deploy/: Caddyfile and backup.sh are referenced but missing (Phase 4).
 - Real model, SendGrid, Spaces and ClamAV never exercised (Phase 4).

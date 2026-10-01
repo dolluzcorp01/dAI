@@ -137,3 +137,13 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 |---|---|---|
 | `server/public/extension/authorize/*` | the eye toggle and a Caps Lock hint | dAdmin's sign in page has both. The one thing people do on both pages now behaves the same way: the eye swaps the field, stays out of the tab order, carries `aria-pressed`, and says which it will do rather than what it is. Caps Lock is why a correct password gets typed wrong. |
 | `server/public/extension/authorize/authorize.js` | the request and the reading of the reply are separate steps | A failed request and a refused credential were one branch, so a server that never answered could be reported as a bad password. No answer, an answer that refuses, and an answer that breaks are now three different messages, and the broken one carries the status. |
+
+## Two findings from the dAdmin audit (2026-10-01)
+
+| File | Change | Why |
+|---|---|---|
+| `server/src/services/kody.service.js` | `// dAI:` `smeQueue` takes `order` and a `from`/`to` window, sorted on `created_at` plus `id` | It was oldest first with no dates, which is fine with five open items and useless with fifty: the thing an expert wants is what came in today, and that was the one thing the list could not show. The direction is a whitelist, not a parameter, because a direction cannot be bound. `id` breaks the tie so two items raised in the same second cannot swap between reads. A bare `to` covers the whole of that day. |
+| `server/src/routes/kody.routes.js` | passes `order`, `from`, `to` through, newest by default | |
+| `web/src/api/endpoints.js` | `smeQueue(status, { order, from, to, limit })`, re-vendored into the extension | |
+| `server/src/lib/safe-error.js` | new | A mysql2 error carries `sql`, the statement with the values filled in. Proven, not assumed: a failing insert of a question naming a patient put the whole sentence in `err.sql`. This is the only thing allowed into a log: kind, driver code, errno, sqlState, a capped message and one frame from our own source. |
+| nine route handlers, `app.js`, `middleware/dadmin-service.js`, `server.js` | `// dAI:` `logError(...)` instead of `console.error(..., err)` | The audit named three. There were twelve. |

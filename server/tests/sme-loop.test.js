@@ -218,3 +218,74 @@ describe("who counts as working the queue", () => {
     assert.ok(!reviewers.includes(outsider.id));
   });
 });
+
+/* dAI: finding today's items in a queue that has fifty open ones. */
+describe("the queue can be ordered and dated", () => {
+  // Three items raised in order, then backdated so the window is testable.
+  let older, middle, newer;
+
+  before(async () => {
+    older = await raiseSmeItem(`Queue order one ${stamp}`, reporter.token);
+    middle = await raiseSmeItem(`Queue order two ${stamp}`, reporter.token);
+    newer = await raiseSmeItem(`Queue order three ${stamp}`, reporter.token);
+    await db.query("UPDATE sme_queue SET created_at = ? WHERE id = ?",
+      ["2026-02-10 09:00:00", older.smeQueueId]);
+    await db.query("UPDATE sme_queue SET created_at = ? WHERE id = ?",
+      ["2026-02-11 09:00:00", middle.smeQueueId]);
+    await db.query("UPDATE sme_queue SET created_at = ? WHERE id = ?",
+      ["2026-02-12 09:00:00", newer.smeQueueId]);
+  });
+
+  const ids = (items) => items.map(i => i.id);
+
+  test("newest first by default, which is what an expert opens the queue for", async () => {
+    const out = await api("GET", "/api/kody/sme?status=open&limit=200", null, reviewer.token);
+    assert.equal(out.status, 200);
+    const mine = ids(out.body.items).filter(id =>
+      [older.smeQueueId, middle.smeQueueId, newer.smeQueueId].includes(id));
+    assert.deepEqual(mine, [newer.smeQueueId, middle.smeQueueId, older.smeQueueId]);
+  });
+
+  test("oldest first is still available for working through a backlog", async () => {
+    const out = await api("GET", "/api/kody/sme?status=open&order=oldest&limit=200", null, reviewer.token);
+    const mine = ids(out.body.items).filter(id =>
+      [older.smeQueueId, middle.smeQueueId, newer.smeQueueId].includes(id));
+    assert.deepEqual(mine, [older.smeQueueId, middle.smeQueueId, newer.smeQueueId]);
+  });
+
+  test("a date window narrows it, and a bare to covers the whole of that day", async () => {
+    const out = await api("GET",
+      "/api/kody/sme?status=open&from=2026-02-11&to=2026-02-12&limit=200", null, reviewer.token);
+    const got = ids(out.body.items);
+    assert.ok(got.includes(middle.smeQueueId), "the 11th is inside the window");
+    assert.ok(got.includes(newer.smeQueueId),
+      "the 12th is inside it too: a bare to must not cut the day off at midnight");
+    assert.ok(!got.includes(older.smeQueueId), "the 10th is outside it");
+  });
+
+  test("one day alone returns that day alone", async () => {
+    const out = await api("GET",
+      "/api/kody/sme?status=open&from=2026-02-11&to=2026-02-11&limit=200", null, reviewer.token);
+    const got = ids(out.body.items);
+    assert.ok(got.includes(middle.smeQueueId));
+    assert.ok(!got.includes(older.smeQueueId) && !got.includes(newer.smeQueueId));
+  });
+
+  test("a nonsense order or date is refused, not quietly ignored", async () => {
+    for (const q of ["order=sideways", "order=; DROP TABLE sme_queue", "from=yesterday", "to=2026-13-45"]) {
+      const out = await api("GET", `/api/kody/sme?status=open&${q}`, null, reviewer.token);
+      assert.equal(out.status, 400, `${q} was accepted`);
+    }
+    const still = await api("GET", "/api/kody/sme?status=open", null, reviewer.token);
+    assert.equal(still.status, 200, "the queue survived");
+  });
+
+  test("the order is stable when two items share a second", async () => {
+    await db.query("UPDATE sme_queue SET created_at = ? WHERE id IN (?,?)",
+      ["2026-02-14 09:00:00", middle.smeQueueId, newer.smeQueueId]);
+    const first = await api("GET", "/api/kody/sme?status=open&limit=200", null, reviewer.token);
+    const second = await api("GET", "/api/kody/sme?status=open&limit=200", null, reviewer.token);
+    assert.deepEqual(ids(first.body.items), ids(second.body.items),
+      "created_at alone would let two items in the same second swap between reads");
+  });
+});

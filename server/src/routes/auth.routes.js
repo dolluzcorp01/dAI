@@ -3,6 +3,7 @@ const express = require("express");
 const config = require("../config");
 const svc = require("../services/auth.service");
 const { authenticate, rateLimit } = require("../middleware/auth");
+const { logError } = require("../lib/safe-error");   // dAI: never log an error object (PHI in err.sql)
 
 const router = express.Router();
 
@@ -17,7 +18,7 @@ function handle(res, err) {
   if (err instanceof svc.AuthError) {
     return res.status(err.status).json({ error: err.code, message: err.message });
   }
-  console.error("auth error:", err);
+  logError("auth error:", err);
   return res.status(500).json({ error: "server_error", message: "Something went wrong." });
 }
 

@@ -15,6 +15,7 @@ const notificationsRoutes = require("./routes/notifications.routes");
 const adminRoutes = require("./routes/admin.routes");
 const { redisHealthy } = require("./realtime/redis");
 const { dadminServiceMiddleware } = require("./middleware/dadmin-service");   // dAI: docs/PHASES.md 1.2
+const { logError } = require("./lib/safe-error");   // dAI: never log an error object (PHI in err.sql)
 
 const MIGRATIONS_DIR = path.join(__dirname, "..", "migrations");
 
@@ -122,7 +123,7 @@ function createApp() {
 
   app.use((req, res) => res.status(404).json({ error: "not_found", message: "No such endpoint." }));
   app.use((err, req, res, _next) => {
-    console.error("unhandled:", err);
+    logError("unhandled:", err);
     res.status(500).json({ error: "server_error", message: "Something went wrong." });
   });
 

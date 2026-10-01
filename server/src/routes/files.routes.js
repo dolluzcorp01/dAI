@@ -5,6 +5,7 @@ const config = require("../config");
 const files = require("../services/files.service");
 const { ValidationError } = require("../lib/validate");
 const { authenticate, rateLimit } = require("../middleware/auth");
+const { logError } = require("../lib/safe-error");   // dAI: never log an error object (PHI in err.sql)
 
 /**
  * Files are buffered in memory so they can be scanned before anything is
@@ -32,7 +33,7 @@ function handle(res, err) {
   if (err && err.status && err.code) {
     return res.status(err.status).json({ error: err.code, message: err.message });
   }
-  console.error("files error:", err);
+  logError("files error:", err);
   return res.status(500).json({ error: "server_error", message: "Something went wrong." });
 }
 
