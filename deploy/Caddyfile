@@ -1,0 +1,110 @@
+# Caddy in front of the two API replicas.
+#
+# Caddy rather than nginx for automatic certificates and one less thing to
+# misconfigure. Everything here is one of three things: TLS, getting traffic to
+# both replicas, or keeping claim detail out of the log.
+
+{
+	email ops@dolluzcorp.com
+	# Caddy's own log. The access log is configured per site below.
+	log {
+		output stderr
+		format console
+	}
+}
+
+dai.dolluzcorp.com {
+	encode zstd gzip
+
+	# A file is capped at MAX_FILE_MB=25 in the application. Caddy refuses a
+	# larger body before it reaches Node, so an upload that was never going to
+	# be accepted does not get buffered first.
+	request_body {
+		max_size 26MB
+	}
+
+	header {
+		# Caddy serves the certificate, so Caddy is where HSTS belongs. One
+		# year, subdomains included. Do NOT add preload until you are certain
+		# every Dolluz subdomain is https, because preload is hard to undo.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+		# The application sets these too (server/src/app.js). Setting them here
+		# as well means a response that bypasses the app, an error page from
+		# Caddy itself, still carries them.
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+
+		# Nothing downstream needs to know what is serving this.
+		-Server
+	}
+
+	# /health/ready names the migrations that have not been applied, which is
+	# more than the public needs. /health says only that the process is up and
+	# is what an uptime check should watch.
+	@ready path /health/ready
+	handle @ready {
+		@private remote_ip private_ranges
+		handle @private {
+			reverse_proxy {
+				dynamic a api 4000
+			}
+		}
+		respond 404
+	}
+
+	handle {
+		reverse_proxy {
+			# Compose runs two replicas behind one DNS name, and a plain
+			# "api:4000" upstream would resolve once at startup and pin every
+			# request to whichever replica answered first. `dynamic a`
+			# re-resolves, so both get traffic and a restarted replica is found
+			# again without reloading Caddy.
+			dynamic a api 4000
+
+			# Round robin is safe because the client connects with
+			# transports: ["websocket"] only (web/src/realtime/socket.js). Long
+			# polling would need sticky sessions, since its handshake and its
+			# subsequent requests must reach the same replica. If polling is
+			# ever enabled, this needs lb_policy cookie, and leaving it as it is
+			# will produce intermittent handshake failures that look like a
+			# network fault.
+			lb_policy round_robin
+
+			# Health checks hit /health, not /health/ready: an active check
+			# every few seconds against readiness would query the database and
+			# Redis from Caddy as well as from each container's own healthcheck.
+			health_uri /health
+			health_interval 10s
+			health_timeout 3s
+
+			# Socket.IO upgrades are handled by reverse_proxy without any extra
+			# configuration, and Caddy streams them rather than buffering.
+		}
+	}
+
+	# The access log, with the parts that can carry claim detail removed.
+	#
+	# A search query ends up in the query string, and a Kody question can name a
+	# patient. An access log is kept, shipped and backed up like any other file,
+	# so the query string is cut off entirely rather than filtered key by key:
+	# a filter has to know every parameter name, and the next one added would
+	# not be on the list.
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 20MiB
+			roll_keep 10
+			roll_keep_for 720h
+		}
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "\?.*" ""
+				request>headers>Authorization delete
+				request>headers>Cookie delete
+				request>headers>Set-Cookie delete
+			}
+		}
+	}
+}

@@ -7,6 +7,8 @@
 
   "minimum_chrome_version": "114",
 
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1ekko5ymKzbFJLP4drqP99K7fgV00P+K0LbV8aS/hOoZWKmvNJPq0QKqAClBdgEYkLUD/yO8FXe0KjgaHCFn180QqX0pVxYiuEt00RPfDEHk6FnQEnMHY7ljaWeyGIIykrvbU9a+JtPmFXS2pAnKTvebogY2Blkxe2Xj6FZbxGzCI9Flv47ebnBeQ1EgxFYqKClJfxKCm3gN9qBqAgYmkMYyb5F1G7CP+MGyQ/TT46dGa1xh/jPMViesE6MHsWTwxNUg08Jo9N4BrKKaBAl5gox/g0wBiddeop2JBwHDHoolrnrKOQeC1xwk9y6DJgxcuyWt8+ZFwHQmVd77+aI5cQIDAQAB",
+
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",

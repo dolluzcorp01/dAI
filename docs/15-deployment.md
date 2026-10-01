@@ -155,8 +155,11 @@ search query can contain claim detail.
 
 ## Not verified
 
-- **No image has been built.** There is no Docker here. The Dockerfile is
-  reviewed, not run.
+- ~~No image has been built.~~ **Built and run, 2026-10-01.** 638 MB, runs as
+  uid 10001 under tini, `/health` answers 200 and `/health/ready` answers 503
+  naming the reason when the database is unreachable, the production guard
+  fires inside the container, and the sign in page is served from the image.
+  Still not run against a real database or behind Caddy.
 - **The CI workflow has never executed.** It parses and the commands were run
   by hand, but GitHub has not run it.
 - **No Spaces bucket has been written to.** The signer is checked against AWS
@@ -165,6 +168,12 @@ search query can contain claim detail.
 - **ClamAV has still never run.** Same as module 7.
 - **No load testing.** Two instances are proven correct, not fast.
 - **The deploy and backup scripts parse but have never run against a droplet.**
+  `backup.sh` exists now and has never produced a dump. Its verification refuses
+  a dump that is too small, unreadable, truncated or missing any of `users`,
+  `messages`, `conversations` or `schema_migrations`, and it prunes only when a
+  readable dump remains.
+- **Caddy has never served anything.** The Caddyfile is written, not run. The
+  access log filter that strips query strings is reviewed, not observed.
 
 ---
 

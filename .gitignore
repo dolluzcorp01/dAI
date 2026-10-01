@@ -7,3 +7,9 @@ dist/
 build/
 *.zip
 .DS_Store
+
+# The extension signing key. Losing it means a new extension id for everyone,
+# so keep a copy somewhere safe. Committing it would let anyone publish an
+# update as us.
+extension/key.pem
+extension/*.pem

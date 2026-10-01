@@ -369,8 +369,26 @@ describe("quick switcher", () => {
   });
 
   test("filters as you type", async () => {
-    const r = await api("GET", "/api/search/switch?q=denials", null, shoban.token);
-    assert.ok(r.body.results.some(x => x.label.includes("denials")));
+    // This used to search for the seeded "denials-help" channel, and failed
+    // intermittently once the database had enough history. The switcher reads
+    // the 200 most recently active conversations and filters those in
+    // JavaScript, and shoban is in more than 200 now, so whether a seeded
+    // channel is inside the window depends on which channels happened to get a
+    // message last. The suite makes its own and posts to it, which puts it at
+    // the top of that window by definition (module rule 16).
+    const name = `Switcher Denials ${MARK}`;
+    const made = await api("POST", "/api/conversations",
+      { kind: "channel", name }, shoban.token);
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    await api("POST", `/api/conversations/${made.body.conversation.id}/messages`,
+      { body: `switcher ${MARK} denial note`, clientMsgId: uid() }, shoban.token);
+
+    const slug = made.body.conversation.slug || "";
+    const term = slug ? slug.slice(0, 12) : "switcher";
+    const r = await api("GET", `/api/search/switch?q=${encodeURIComponent(term)}`, null, shoban.token);
+    assert.equal(r.status, 200);
+    assert.ok(r.body.results.some(x => x.label.toLowerCase().includes(term.toLowerCase())),
+      `nothing matched ${term}: ${JSON.stringify(r.body.results.slice(0, 5))}`);
   });
 
   test("falls through to people when no conversation matches", async () => {

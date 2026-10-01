@@ -335,6 +335,47 @@ describe("where the extension talks to", () => {
     assert.equal((await config.endpoints(storage)).isProduction, true);
   });
 
+  test("the manifest key pins the id, so every tester gets the same one", () => {
+    // Without a key Chrome derives the id from the folder path, so every
+    // machine that loads this unpacked gets a different id and the server
+    // needs an EXTENSION_IDS entry per tester.
+    const crypto = require("node:crypto");
+    assert.ok(manifest.key, "no key: the id would differ on every machine");
+
+    const der = Buffer.from(manifest.key, "base64");
+    assert.doesNotThrow(() => crypto.createPublicKey({ key: der, format: "der", type: "spki" }),
+      "the key is not a DER public key");
+
+    // The same derivation Chrome uses: the first 128 bits of SHA-256 over the
+    // DER public key, hex digits mapped onto a to p.
+    const hex = crypto.createHash("sha256").update(der).digest("hex").slice(0, 32);
+    const id = [...hex].map(c => String.fromCharCode(97 + parseInt(c, 16))).join("");
+    assert.match(id, /^[a-p]{32}$/, `derived id is not a valid id: ${id}`);
+
+    // The server only mints a code for an id it has been told about, so the
+    // derived id and EXTENSION_IDS have to agree or sign in fails everywhere.
+    const configured = String(process.env.EXTENSION_IDS || "").split(",").map(s => s.trim());
+    assert.ok(configured.includes(id) || configured.includes(EXT_ID),
+      `the manifest derives id ${id}, which is not in EXTENSION_IDS`);
+  });
+
+  test("the private key is not in the repository and cannot be packaged", () => {
+    const fsp = require("node:fs");
+    const gitignore = fsp.readFileSync(path.join(EXT, "..", ".gitignore"), "utf8");
+    assert.match(gitignore, /extension\/key\.pem/, "the signing key is not ignored");
+
+    const build = readExt("build.js");
+    assert.match(build, /-x "\*\.pem"/, "the zip does not exclude the key");
+
+    // Whatever happens, a private key must not be inside the packaged folders.
+    for (const dir of ["src", "icons"]) {
+      const walk = (at) => fsp.readdirSync(at, { withFileTypes: true }).flatMap(e =>
+        e.isDirectory() ? walk(path.join(at, e.name)) : [e.name]);
+      const keys = walk(path.join(EXT, dir)).filter(n => n.endsWith(".pem"));
+      assert.deepEqual(keys, [], `a key is inside ${dir}, which ships`);
+    }
+  });
+
   test("only the Dolluz site may send the extension a message", () => {
     // Without this key onMessageExternal never fires, so the sign in page
     // could not hand a code back at all. With a wildcard, any page could try.

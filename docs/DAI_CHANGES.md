@@ -156,3 +156,14 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | `server/src/services/kody.service.js` | `queueBoundary` converts a business day to the UTC instant, and validates the date before rolling it | `Date.UTC` rolls the 45th of the 13th month into next year rather than failing, and the old check skipped the `to` side entirely. |
 | `server/src/lib/safe-error.js` | a driver error keeps code, errno and sqlState, and no message | `ER_DUP_ENTRY` reports the offending value. A small door is still a door. Ordinary errors keep their message, which is the point of having one. |
 | `server/src/services/kody.service.js`, `routes/kody.routes.js` | all four statuses, plus `all`, and an unknown one is refused | The column is `ENUM('open','in_review','resolved','rejected')` but the route mapped anything but open or resolved to open, so an item being worked on or rejected could not be listed, and asking for one returned the open list as though that were the answer. Quietly correcting bad input is what hid it. |
+
+## Phase 4 step 2: the pieces that need no provisioning (2026-10-01)
+
+| File | Change | Why |
+|---|---|---|
+| `deploy/Caddyfile` | new | Referenced by docker-compose.prod.yml and missing. Uses `dynamic a` upstreams so both replicas get traffic rather than whichever answered first, health checks `/health` rather than `/health/ready` so Caddy does not query the database every ten seconds, keeps `/health/ready` to private ranges because it names unapplied migrations, and cuts the query string out of the access log entirely rather than filtering known parameter names. |
+| `deploy/backup.sh` | new | Called by deploy.sh before every migration and missing. Refuses a dump that is under 10 KB, that gzip cannot read, that has no completion marker, or that is missing `users`, `messages`, `conversations` or `schema_migrations`. Prunes only when a readable dump remains. The dump holds message bodies, so it is written 0600 into a 0700 directory. |
+| `extension/manifest.json` | `key` | Pins the extension id to `ikamkodfpkklimdldhfpnhmmlapdjpmn` on every machine, so a pilot needs one EXTENSION_IDS entry rather than one per tester. |
+| `extension/build.js` | derives and prints the id, excludes `*.pem` from the zip | The id is otherwise only discoverable by loading it in Chrome. |
+| `.gitignore` | `extension/*.pem` | The signing key must never be committed. |
+| `server/tests/search.test.js` | the switcher test makes its own channel | It searched for a seeded channel, and the switcher reads only the 200 most recently active conversations before filtering. Once the seed user passed 345 conversations the test passed or failed depending on which channels had been posted to last. |

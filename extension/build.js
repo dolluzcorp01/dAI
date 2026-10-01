@@ -114,6 +114,37 @@ if (/kody_access|kody_refresh|accessToken|refreshToken/.test(bubble)) {
   problems.push("the content script references a token, which the page could read");
 }
 
+/* The id this build will have.
+   With a "key" in the manifest Chrome derives the id from it rather than from
+   the folder path, so every machine loading this unpacked gets the same id and
+   the server needs one EXTENSION_IDS entry rather than one per tester. */
+let derivedId = null;
+if (manifest.key) {
+  const crypto = require("crypto");
+  let der;
+  try {
+    der = Buffer.from(manifest.key, "base64");
+    crypto.createPublicKey({ key: der, format: "der", type: "spki" });
+  } catch (err) {
+    problems.push("the manifest key is not a DER public key in base64");
+  }
+  if (der) {
+    const hex = crypto.createHash("sha256").update(der).digest("hex").slice(0, 32);
+    derivedId = [...hex].map(c => String.fromCharCode(97 + parseInt(c, 16))).join("");
+    if (!/^[a-p]{32}$/.test(derivedId)) problems.push(`derived id is not a valid id: ${derivedId}`);
+  }
+} else {
+  warnings.push("no \"key\" in the manifest: Chrome will derive the id from the folder path, "
+    + "so every machine gets a different one");
+}
+
+/* The private half must never be packaged, and must never be committed. */
+for (const stray of fs.readdirSync(ROOT)) {
+  if (!stray.endsWith(".pem")) continue;
+  const ignored = read(path.join("..", ".gitignore")).includes("extension/key.pem");
+  if (!ignored) problems.push(`${stray} is present and .gitignore does not cover it`);
+}
+
 /* store requirements that are easy to forget */
 if (!/^\d+(\.\d+){0,3}$/.test(manifest.version)) problems.push("version must be one to four numbers");
 if ((manifest.description || "").length > 132) problems.push("description must be 132 characters or fewer");
@@ -139,6 +170,10 @@ fs.rmSync(parseDir, { recursive: true, force: true });
 /* report */
 console.log(`Kody extension ${manifest.version}`);
 console.log(`  files referenced by the manifest: ${referenced.size}`);
+if (derivedId) {
+  console.log(`  extension id: ${derivedId}`);
+  console.log("                (put this in the server's EXTENSION_IDS)");
+}
 warnings.forEach(w => console.log(`  warning: ${w}`));
 
 if (problems.length > 0) {
@@ -154,7 +189,9 @@ if (process.argv.includes("--zip")) {
   const out = path.join(dist, `kody-extension-${manifest.version}.zip`);
   if (fs.existsSync(out)) fs.unlinkSync(out);
   // Store rules: the zip contains the manifest at its root, not a folder.
-  execSync(`cd "${ROOT}" && zip -r -q "${out}" manifest.json src icons -x "*.DS_Store"`);
+  // manifest.json, src and icons only. key.pem lives beside them and is not
+  // named here, which is the point: the private key is not part of the build.
+  execSync(`cd "${ROOT}" && zip -r -q "${out}" manifest.json src icons -x "*.DS_Store" -x "*.pem"`);
   const size = fs.statSync(out).size;
   console.log(`  wrote ${path.relative(process.cwd(), out)} (${Math.round(size / 1024)} KB)`);
 }

@@ -258,6 +258,24 @@ disagree.
 
 ---
 
+## The id is pinned by a key
+
+`manifest.json` carries a `key`: the public half of `extension/key.pem`. Chrome
+derives the extension id from it, so every machine that loads this unpacked
+gets the same id and the server needs one `EXTENSION_IDS` entry rather than one
+per tester. Without it Chrome derives the id from the folder path, which
+differs on every machine.
+
+The id is **`ikamkodfpkklimdldhfpnhmmlapdjpmn`**, and `node extension/build.js`
+prints it so nobody has to open Chrome to find out.
+
+`extension/key.pem` is gitignored and must be kept: losing it means a new id for
+everyone, and the Web Store listing in Phase 3 has to be created with this same
+key or the published extension will have a different id again. Committing it
+would let anyone publish an update as us.
+
+---
+
 ## Loading it
 
 ```

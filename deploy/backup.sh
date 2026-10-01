@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+#
+# Nightly database dump, verified and pruned.
+#
+#   ./backup.sh                 dump, verify, prune
+#   ./backup.sh --verify-only FILE   check an existing dump
+#
+# deploy.sh calls this before every migration, so it is also the thing standing
+# between a bad migration and a lost database.
+#
+# A backup nobody has restored is not a backup. This cannot restore for you, but
+# it refuses to report success on a dump that is empty, truncated, unreadable or
+# missing the tables that matter. Those are the four ways a backup job runs
+# green for months and gives you nothing on the day.
+#
+# The dump contains message bodies, so it contains claim detail. It is written
+# 0600 into a 0700 directory. Copying it anywhere else is a decision about PHI,
+# not a convenience: encrypt it and keep it off any machine that does not need
+# it.
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+BACKUP_DIR="${BACKUP_DIR:-./backups}"
+KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
+MIN_BYTES="${BACKUP_MIN_BYTES:-10240}"          # 10 KB: anything smaller is not a database
+MYSQL_IMAGE="${MYSQL_IMAGE:-mysql:8}"
+
+# The tables whose absence means the dump is not usable. Not every table: these
+# four are the ones that prove it ran against the right database and finished.
+REQUIRED_TABLES=(users messages conversations schema_migrations)
+
+say() { echo "==> $*"; }
+die() { echo "backup failed: $*" >&2; exit 1; }
+
+# ---------------------------------------------------------------- verify
+
+verify() {
+  local file="$1"
+
+  [ -f "$file" ] || die "no such dump: $file"
+
+  local size
+  size=$(wc -c < "$file" | tr -d ' ')
+  [ "$size" -ge "$MIN_BYTES" ] \
+    || die "dump is ${size} bytes, under the ${MIN_BYTES} minimum. A dump this small is an error message, not a database."
+
+  gzip -t "$file" 2>/dev/null \
+    || die "gzip cannot read $file. It is truncated or was never finished."
+
+  # mysqldump writes this as its last line. Without it the dump stopped early,
+  # which is exactly the case that still gunzips and still looks plausible.
+  gzip -dc "$file" | tail -5 | grep -q "Dump completed" \
+    || die "the dump has no completion marker. It stopped partway."
+
+  local missing=()
+  for table in "${REQUIRED_TABLES[@]}"; do
+    gzip -dc "$file" | grep -q "CREATE TABLE \`${table}\`" || missing+=("$table")
+  done
+  [ ${#missing[@]} -eq 0 ] \
+    || die "these tables are not in the dump: ${missing[*]}. Wrong database, or the dump was filtered."
+
+  say "verified $(basename "$file") (${size} bytes, all ${#REQUIRED_TABLES[@]} required tables present)"
+}
+
+if [ "${1:-}" = "--verify-only" ]; then
+  [ -n "${2:-}" ] || die "--verify-only needs a file"
+  verify "$2"
+  exit 0
+fi
+
+# ---------------------------------------------------------------- settings
+
+[ -f .env.production ] || die "no .env.production here. Copy .env.example and fill it in."
+
+# Read only the keys needed, rather than sourcing the whole file: .env.production
+# holds API keys and secrets, and this script has no business with them.
+env_value() {
+  local key="$1"
+  sed -n "s/^${key}=//p" .env.production | tail -1 | sed 's/^"//; s/"$//; s/^'"'"'//; s/'"'"'$//'
+}
+
+DB_HOST="$(env_value DB_HOST)"
+DB_PORT="$(env_value DB_PORT)"
+DB_NAME="$(env_value DB_NAME)"
+DB_USER="$(env_value DB_USER)"
+DB_PASSWORD="$(env_value DB_PASSWORD)"
+
+[ -n "$DB_HOST" ] || die "DB_HOST is not set in .env.production"
+[ -n "$DB_NAME" ] || die "DB_NAME is not set in .env.production"
+[ -n "$DB_USER" ] || die "DB_USER is not set in .env.production"
+[ -n "$DB_PASSWORD" ] || die "DB_PASSWORD is not set in .env.production"
+DB_PORT="${DB_PORT:-3306}"
+
+mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+OUT="${BACKUP_DIR}/${DB_NAME}-${STAMP}.sql.gz"
+TMP="${OUT}.part"
+
+# A failed dump must not be left looking like a backup.
+trap 'rm -f "$TMP"' EXIT
+
+# ---------------------------------------------------------------- dump
+
+# mysqldump runs in a throwaway container, so the droplet does not need a MySQL
+# client installed and the client version always matches the server.
+#
+# --single-transaction  a consistent snapshot without locking writers out
+# --no-tablespaces      managed MySQL does not grant PROCESS, which this needs
+# --set-gtid-purged=OFF the dump is for restoring here, not for seeding a replica
+# --password on stdin   so it never appears in `ps` or in the shell history
+say "dumping ${DB_NAME} from ${DB_HOST}:${DB_PORT}"
+
+if command -v mysqldump >/dev/null 2>&1; then
+  MYSQL_PWD="$DB_PASSWORD" mysqldump \
+    --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" \
+    --single-transaction --quick --routines --triggers --events \
+    --no-tablespaces --set-gtid-purged=OFF \
+    "$DB_NAME" | gzip -9 > "$TMP"
+else
+  docker run --rm -i -e MYSQL_PWD="$DB_PASSWORD" "$MYSQL_IMAGE" \
+    mysqldump \
+    --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" \
+    --single-transaction --quick --routines --triggers --events \
+    --no-tablespaces --set-gtid-purged=OFF \
+    "$DB_NAME" | gzip -9 > "$TMP"
+fi
+
+mv "$TMP" "$OUT"
+chmod 600 "$OUT"
+trap - EXIT
+
+verify "$OUT"
+
+# ---------------------------------------------------------------- prune
+
+# Only ever deletes files this script named, in this directory, that verify
+# clean. A pruner that deletes on age alone will one day delete the only good
+# backup because the newer ones were broken.
+newest_good=""
+while IFS= read -r candidate; do
+  if gzip -t "$candidate" 2>/dev/null; then newest_good="$candidate"; break; fi
+done < <(ls -1t "${BACKUP_DIR}/${DB_NAME}-"*.sql.gz 2>/dev/null || true)
+
+if [ -z "$newest_good" ]; then
+  say "nothing readable to prune against. Keeping everything."
+  exit 0
+fi
+
+pruned=0
+while IFS= read -r old; do
+  [ "$old" = "$newest_good" ] && continue
+  rm -f "$old"
+  pruned=$((pruned + 1))
+done < <(find "$BACKUP_DIR" -maxdepth 1 -name "${DB_NAME}-*.sql.gz" -type f -mtime "+${KEEP_DAYS}" 2>/dev/null || true)
+
+say "kept $(find "$BACKUP_DIR" -maxdepth 1 -name "${DB_NAME}-*.sql.gz" -type f | wc -l | tr -d ' ') dumps, pruned ${pruned} older than ${KEEP_DAYS} days"
+say "latest: ${OUT}"

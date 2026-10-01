@@ -231,6 +231,12 @@ by a real person. PENDING = not started. Update this table at the end of every s
 1.5 dAdmin dAI pages (separate repo, see PROMPT_dAdmin.md)
 
 ## Known gaps carried forward (do not lose these)
+- The quick switcher reads the 200 most recently active conversations and filters those in
+  JavaScript (search.service.js). Someone in more than 200 conversations cannot find an
+  older one by typing its name, and it fails silently: the list simply does not contain it.
+  Found on 2026-10-01 because a test went intermittent once the seed user passed 345
+  conversations. The test now owns its data; the product behaviour is unchanged and
+  unreported to anyone using it.
 - The SME queue date filter reads a bare date in BUSINESS_DAY_OFFSET, default +05:30, and
   everything is stored in UTC. A fixed offset is exact for India. If dAI is ever used from a
   zone with daylight saving, this needs a real time zone database rather than an offset.
@@ -241,6 +247,6 @@ by a real person. PENDING = not started. Update this table at the end of every s
   gets a session that dies at the first refresh. Narrow, but it is the only gap left in the
   sign-in path. Phase 4: re-check in exchangeCode, or bind the check into the code row.
 - Extension: popup HTML/JS, side panel HTML, bubble.css, icons. Moved from Phase 3 into 1.4b.
-- deploy/: Caddyfile and backup.sh are referenced but missing (Phase 4).
+- deploy/: Caddyfile and backup.sh written 2026-10-01. Neither has run on a droplet.
 - Real model, SendGrid, Spaces and ClamAV never exercised (Phase 4).
 - CPT (AMA) and CDT (ADA) licences before importing those code sets (Phase 4).
