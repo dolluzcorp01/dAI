@@ -12,6 +12,7 @@ const assert = require("node:assert");
 const http = require("node:http");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
+const fs = require("node:fs");
 const crypto = require("node:crypto");
 
 process.env.AUTH_RATE_LOGIN_MAX = "10000";
@@ -397,5 +398,71 @@ describe("production configuration guards", () => {
 
   test("a properly configured production environment starts", () => {
     assert.equal(checkProd(goodEnough), null, "all guards pass with real settings");
+  });
+
+  /* dAI: the pilot runs with file sharing off (docs/16-pilot-runbook.md). */
+
+  test("a pilot with file sharing off starts, with no Spaces and no ClamAV", () => {
+    const pilot = {
+      ...goodEnough,
+      STORAGE_DRIVER: "none", FILE_SCANNER: "none",
+      SPACES_ENDPOINT: "", SPACES_BUCKET: "", SPACES_ACCESS_KEY: "", SPACES_SECRET_KEY: "",
+      CLAMAV_HOST: "",
+      MAIL_DRIVER: "none", PUSH_DRIVER: "none",
+    };
+    assert.equal(checkProd(pilot), null,
+      "a pilot without object storage, antivirus, mail or push has to be able to start");
+  });
+
+  test("file sharing on with no scanner is refused, which is the pair that matters", () => {
+    // Turning storage back on and forgetting the scanner is one line, and it
+    // would accept uploads with no antivirus at all.
+    const err = checkProd({ ...goodEnough, STORAGE_DRIVER: "spaces", FILE_SCANNER: "none" });
+    assert.match(err || "", /file sharing on and FILE_SCANNER=none/);
+  });
+
+  test("a scanner value nobody recognises is refused, not quietly treated as local", () => {
+    // The old check refused the exact string "local", so FILE_SCANNER=off
+    // passed it and then fell through to the local EICAR stub: the failure the
+    // check existed to prevent, reached by a typo.
+    for (const scanner of ["off", "disabled", "clam", ""]) {
+      const err = checkProd({ ...goodEnough, FILE_SCANNER: scanner });
+      assert.match(err || "", /FILE_SCANNER/, `FILE_SCANNER=${scanner} was accepted`);
+    }
+  });
+
+  test("a storage driver nobody recognises is refused too", () => {
+    for (const driver of ["off", "disabled", "s3", ""]) {
+      const err = checkProd({ ...goodEnough, STORAGE_DRIVER: driver });
+      assert.match(err || "", /STORAGE_DRIVER/, `STORAGE_DRIVER=${driver} was accepted`);
+    }
+  });
+});
+
+describe("file sharing turned off", () => {
+  const { createStorage, NoStorage } = require("../src/lib/storage");
+
+  test("the none driver refuses rather than pretending to store", async () => {
+    const storage = createStorage({ files: { driver: "none" } });
+    assert.ok(storage instanceof NoStorage);
+    await assert.rejects(() => storage.put("k", Buffer.from("x"), "text/plain"),
+      (err) => err.status === 503 && err.code === "files_disabled");
+    await assert.rejects(() => storage.get("k"),
+      (err) => err.code === "files_disabled");
+    // Removing something that was never stored is not an error worth raising.
+    assert.equal(await storage.remove("k"), false);
+  });
+
+  test("an upload is refused before it is validated or scanned", async () => {
+    // The refusal has to come first: a file that was scanned, validated and
+    // written to a row before being dropped looks like a bug, not a policy.
+    const src = fs.readFileSync(path.join(__dirname, "..", "src", "services", "files.service.js"), "utf8");
+    const upload = src.slice(src.indexOf("async function upload("));
+    const refusal = upload.indexOf("files_disabled");
+    const firstScan = upload.indexOf("scanner.scan");
+    const firstNoFile = upload.indexOf("no_file");
+    assert.ok(refusal > 0, "upload does not check whether file sharing is on");
+    assert.ok(refusal < firstNoFile, "it validates the file before refusing");
+    assert.ok(firstScan === -1 || refusal < firstScan, "it scans the file before refusing");
   });
 });

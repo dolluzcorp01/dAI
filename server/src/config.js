@@ -145,11 +145,33 @@ if (config.env === "production") {
   if (!config.redis.url) {
     throw new Error("Refusing to start in production without REDIS_URL: a second instance would silently drop messages.");
   }
-  if (config.files.driver === "local") {
-    throw new Error("Refusing to start in production with STORAGE_DRIVER=local: disk is not shared and does not survive a redeploy.");
+  // dAI: a whitelist, not a blacklist. The old check refused the exact string
+  // "local", so FILE_SCANNER=off passed it and then fell through to the local
+  // EICAR stub, which is the failure the check existed to prevent.
+  const STORAGE_DRIVERS = ["spaces", "none"];
+  const SCANNERS = ["clamav", "none"];
+
+  if (!STORAGE_DRIVERS.includes(config.files.driver)) {
+    throw new Error(
+      `Refusing to start in production with STORAGE_DRIVER=${config.files.driver}. `
+      + "Use spaces, or none to turn file sharing off. Local disk is not shared "
+      + "and does not survive a redeploy."
+    );
   }
-  if (config.files.scanner === "local") {
-    throw new Error("Refusing to start in production with FILE_SCANNER=local: EICAR detection is not antivirus.");
+  if (!SCANNERS.includes(config.files.scanner)) {
+    throw new Error(
+      `Refusing to start in production with FILE_SCANNER=${config.files.scanner}. `
+      + "Use clamav, or none when file sharing is off. EICAR detection is not antivirus."
+    );
+  }
+  // The pair matters more than either alone: uploads must never be accepted
+  // without a real scanner, and turning storage on while leaving the scanner at
+  // none would do exactly that by forgetting one line.
+  if (config.files.driver !== "none" && config.files.scanner === "none") {
+    throw new Error(
+      "Refusing to start in production with file sharing on and FILE_SCANNER=none. "
+      + "Set FILE_SCANNER=clamav, or STORAGE_DRIVER=none to turn file sharing off."
+    );
   }
   if (config.ai.primaryProvider === "mock" || config.ai.fallbackProvider === "mock") {
     throw new Error("Refusing to start in production with the mock model provider.");

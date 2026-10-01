@@ -76,6 +76,12 @@ const humanSize = (bytes) => {
  * the download handler checks the column rather than trusting the upload.
  */
 async function upload(userId, conversationId, file, { versionOfId } = {}) {
+  // dAI: file sharing is Phase 2, and a pilot runs with STORAGE_DRIVER=none.
+  // Refuse here rather than after validating, scanning and writing a row, so
+  // the answer is the plain one: this server does not do files.
+  if (config.files.driver === "none") {
+    throw new FileError(503, "files_disabled", "File sharing is not enabled on this server.");
+  }
   if (!file || !file.buffer) throw new FileError(400, "no_file", "No file was uploaded.");
 
   await msgs.membership(conversationId, userId).then(m => {

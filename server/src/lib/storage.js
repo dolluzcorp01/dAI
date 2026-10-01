@@ -196,12 +196,40 @@ class SpacesStorage {
   }
 }
 
+/**
+ * dAI: file sharing turned off (docs/16-pilot-runbook.md).
+ *
+ * The pilot has no file sharing, and the alternative to this is running
+ * production with the local driver, which does not survive a redeploy, or
+ * provisioning object storage for a feature nobody is using yet. Both are
+ * worse than saying no.
+ *
+ * It refuses rather than pretending to succeed. An upload that silently went
+ * nowhere would be discovered by someone who needed the file back.
+ */
+class NoStorage {
+  constructor() { this.driver = "none"; }
+
+  async put() { throw NoStorage.refusal(); }
+  async get() { throw NoStorage.refusal(); }
+  async remove() { return false; }
+  async url() { throw NoStorage.refusal(); }
+
+  static refusal() {
+    const err = new Error("File sharing is not enabled on this server.");
+    err.status = 503;
+    err.code = "files_disabled";
+    return err;
+  }
+}
+
 function createStorage(config) {
   switch (config.files.driver) {
     case "local": return new LocalStorage(config.files.localPath);
     case "spaces": return new SpacesStorage(config);
+    case "none": return new NoStorage();
     default: throw new Error(`Unknown STORAGE_DRIVER: ${config.files.driver}`);
   }
 }
 
-module.exports = { createStorage, LocalStorage, keyFor, EXT_FOR_MIME };
+module.exports = { createStorage, LocalStorage, NoStorage, keyFor, EXT_FOR_MIME };

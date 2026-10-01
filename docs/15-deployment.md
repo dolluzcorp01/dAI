@@ -70,8 +70,9 @@ and fails quietly:
 |---|---|
 | development JWT secrets | every token would be forgeable |
 | no `REDIS_URL` | a second instance silently drops messages |
-| `STORAGE_DRIVER=local` | disk is not shared and does not survive a redeploy |
-| `FILE_SCANNER=local` | EICAR detection is not antivirus |
+| any `STORAGE_DRIVER` but `spaces` or `none` | local disk is not shared and does not survive a redeploy. `none` turns file sharing off, which is what a pilot without it should run |
+| any `FILE_SCANNER` but `clamav` or `none` | EICAR detection is not antivirus. A whitelist, because the old check refused the exact string `local`, so `off` passed it and fell through to the local stub |
+| file sharing on with `FILE_SCANNER=none` | turning storage back on and forgetting the scanner is one line, and it would accept uploads with no antivirus at all |
 | `MODEL_PRIMARY_PROVIDER=mock` | canned answers, no model |
 | `MAIL_DRIVER` or `PUSH_DRIVER` of `memory` | mail and push would vanish |
 
@@ -120,18 +121,36 @@ by running it rather than reading it.
 
 ## The stack
 
+**Production is pm2 behind nginx, not Docker.** The Dolluz server runs every
+dApp as a pm2 process behind one nginx, with certbot for TLS and MySQL on the
+same box. Caddy would collide with nginx on 80 and 443, so the Caddyfile that
+used to be here was deleted rather than kept: a config that cannot run is a
+thing someone will one day try to use. docs/16-pilot-runbook.md is how dAI
+actually goes out.
+
 ```
 deploy/
-  docker-compose.prod.yml   api x2, redis, clamav, caddy
-  Caddyfile                 TLS, headers, health-checked upstream
-  deploy.sh                 pull, backup, migrate, roll, verify, roll back
-  backup.sh                 nightly dump, verified, pruned
-Dockerfile                  multi stage, non root, tini, healthcheck
+  nginx/dai.dolluzcorp.com.conf   the site: /api/, /extension/, /socket.io/
+  deploy.sh                       backup, install, migrate, pm2 reload, verify, roll back
+  backup.sh                       nightly dump, verified, pruned
+  docker/                         parked. Not how this runs. See its README
+ecosystem.config.js               pm2: one process, fork mode, capped heap
+Dockerfile                        still current, builds and runs, used by CI
 ```
+
+The rest of this document describes the containerised stack, which is still the
+right shape for a box that is not shared with twelve other apps. The reasoning
+below about replicas, readiness and migrations carries over; only the mechanism
+changed.
 
 **Two API replicas on purpose.** It is the smallest configuration that proves
 the Redis adapter is working. One replica would hide the failure until the day
 you scale.
+
+**The pilot runs one.** The box is 1 vCPU and 1 GB, already in swap, with twelve
+other dApps on it, and a second process to prove a point is not worth taking
+those twelve down. So on that box the adapter is configured and unproven, which
+is written into the runbook rather than left to be discovered.
 
 **Migrations run in a single container before the new image starts**, so two
 replicas cannot race applying the same migration.

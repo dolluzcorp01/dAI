@@ -29,6 +29,7 @@ const PASSWORD = "Kody!Dev2026";
 const stamp = Date.now().toString(36);
 const MARKER = `zqdismiss${stamp}`;
 let server, base, adminToken, subToken, asked;
+const myThreads = [];   // what this suite created, so it can take it back out
 
 const api = async (method, p, body, token) => {
   const res = await fetch(`${base}${p}`, {
@@ -70,19 +71,40 @@ before(async () => {
   subToken = (await api("POST", "/api/auth/login", { email, password: PASSWORD })).body.accessToken;
 
   // A question with no document behind it, which is what the panel collects.
+  //
   // The panel is capped at 50 rows ordered by how often a question was asked,
-  // and a development database holds plenty of once-asked rows, so ask it often
-  // enough to rank rather than hoping it lands inside the page.
+  // so this suite has to rank to be seen at all. A fixed number does not work:
+  // it used to ask 20 times, every run left a 20 behind, the fiftieth row
+  // climbed to 20, and the suite started tying with its own history and losing
+  // an arbitrary tie-break. So find where the cut actually is, clear it, and
+  // take these rows out again afterwards so the cut stops climbing.
+  const ranked = await analytics.unanswered({ limit: 50 });
+  const cut = ranked.length < 50 ? 0 : Math.min(...ranked.map(r => Number(r.asked) || 0));
+  const times = Math.min(cut + 3, 60);
+
   asked = `Which modifier applies to ${MARKER}`;
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < times; i++) {
     const r = await api("POST", "/api/kody/ask", { question: asked }, adminToken);
     assert.equal(r.status, 200, "the question must actually be asked");
+    if (r.body && r.body.threadId) myThreads.push(Number(r.body.threadId));
   }
   analytics.clearCache();
 });
 
 after(async () => {
   await db.query("DELETE FROM unanswered_dismissals WHERE note LIKE ?", [`%${stamp}%`]);
+
+  // Take back exactly the threads this suite created, by id. Without this each
+  // run leaves a row near the top of a fifty row panel, the next run has to
+  // clear a higher bar, and eventually no run can. A suite that cannot be run
+  // twice is not a test.
+  if (myThreads.length > 0) {
+    const ids = [...new Set(myThreads)];
+    const marks = ids.map(() => "?").join(",");
+    await db.query(`DELETE FROM kody_messages WHERE thread_id IN (${marks})`, ids);
+    await db.query(`DELETE FROM kody_threads WHERE id IN (${marks})`, ids);
+  }
+
   server.close();
   await db.pool.end();
 });

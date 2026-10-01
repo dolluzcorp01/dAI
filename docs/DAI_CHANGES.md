@@ -167,3 +167,21 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | `extension/build.js` | derives and prints the id, excludes `*.pem` from the zip | The id is otherwise only discoverable by loading it in Chrome. |
 | `.gitignore` | `extension/*.pem` | The signing key must never be committed. |
 | `server/tests/search.test.js` | the switcher test makes its own channel | It searched for a seeded channel, and the switcher reads only the 200 most recently active conversations before filtering. Once the seed user passed 345 conversations the test passed or failed depending on which channels had been posted to last. |
+
+## Phase 4 re-planned for pm2 and nginx (2026-10-01)
+
+Production is the shared Dolluz server, not Docker: pm2 behind one nginx, with
+twelve other dApps on 1 vCPU and 1 GB.
+
+| File | Change | Why |
+|---|---|---|
+| `server/src/lib/storage.js` | `// dAI:` a `none` driver | The pilot has no file sharing, and the only drivers were `local` (refused in production) and `spaces` (would mean provisioning object storage for a feature nobody uses). It refuses rather than pretending: an upload that silently went nowhere would be found by whoever needed the file back. |
+| `server/src/config.js` | `// dAI:` whitelists for both, and the pair rule | The old guard refused the exact string `local`, so `FILE_SCANNER=off` passed it and fell through to the local EICAR stub, which is the failure the guard existed to prevent. File sharing on with no scanner is now refused outright. |
+| `server/src/services/files.service.js` | `// dAI:` refuse an upload before validating or scanning it | A file that was scanned and written to a row before being dropped looks like a bug rather than a policy. |
+| `ecosystem.config.js` | new | pm2, one process, fork mode, heap capped at 256 MB, restart above 250 MB. One process because the box is already in swap, which makes the Redis adapter configured and unproven in production. |
+| `deploy/nginx/dai.dolluzcorp.com.conf` | new | Port 4011. Express serves the sign-in page rather than nginx, so the CSP the tests assert is the CSP that ships. Logs the path without the query string, because a search term can carry claim detail. |
+| `deploy/deploy.sh` | rewritten for pm2 | Backup, install, migrate once, reload, verify, roll the code back. Says plainly that migrations do not roll back with it. |
+| `deploy/Caddyfile` | deleted | Caddy would collide with nginx on 80 and 443. |
+| `deploy/docker/` | parked, with a README | Keeps the two-replica reasoning for a box where it can be proven. |
+| `docs/16-pilot-runbook.md` | new | Provisioning, first deploy on mock, the first real model call, the imports, backups against a 92% full disk, and rollback. |
+| `server/tests/unanswered-dismiss.test.js` | reads where the panel cut is, and deletes its own threads afterwards | It asked 20 times to rank in a 50 row panel. Every run left a 20 behind, the fiftieth row climbed to 20, and the suite began tying with its own history and losing an arbitrary tie-break. A suite that cannot be run twice is not a test. |

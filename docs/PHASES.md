@@ -9,7 +9,7 @@ by a real person. PENDING = not started. Update this table at the end of every s
 | 1 | Sign-in through dAdmin, the extension client (Ask Kody), SME loop with notifications, dAI admin pages in dAdmin | 1.1 to 1.4 DONE, Chrome done-check PASSED 2026-10-01. 1.5 is dAdmin |
 | 2 | Team chat, files with virus scan, search, notifications UI, daily digest by SendGrid | BUILT on the server, UI PENDING |
 | 3 | Chrome extension: packaging and the Web Store listing. The missing files and the real browser test moved into 1.4 | PENDING |
-| 4 | Production on DigitalOcean: droplet, managed MySQL, Spaces, Redis, ClamAV, Caddy, first real Claude call, CMS code import | PENDING |
+| 4 | Pilot on the shared Dolluz server: pm2 on 4011 behind nginx, Redis on the box, kody on the same MySQL as dadmin, first real Claude call, CARC/RARC/ICD-10 import. Spaces, ClamAV and Caddy are NOT in the pilot | IN PROGRESS, see docs/16-pilot-runbook.md |
 | 5 | Mobile apps, Edge/Firefox/Safari, pgvector if MySQL full-text is not enough | LATER |
 
 ## Phase 1 - items (one per session, in this order)
@@ -247,6 +247,8 @@ by a real person. PENDING = not started. Update this table at the end of every s
   gets a session that dies at the first refresh. Narrow, but it is the only gap left in the
   sign-in path. Phase 4: re-check in exchangeCode, or bind the check into the code row.
 - Extension: popup HTML/JS, side panel HTML, bubble.css, icons. Moved from Phase 3 into 1.4b.
-- deploy/: Caddyfile and backup.sh written 2026-10-01. Neither has run on a droplet.
-- Real model, SendGrid, Spaces and ClamAV never exercised (Phase 4).
+- deploy/: backup.sh and the pm2 deploy.sh written. Neither has run on the server. The
+  Caddyfile was deleted: Caddy would collide with nginx on 80 and 443.
+- Real model never exercised. SendGrid, Spaces and ClamAV are OUT of the pilot: mail and
+  push run with the none transport, and file sharing runs with STORAGE_DRIVER=none.
 - CPT (AMA) and CDT (ADA) licences before importing those code sets (Phase 4).
