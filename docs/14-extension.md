@@ -129,6 +129,7 @@ review risk.
 | Area | Checks |
 |---|---|
 | Manifest | MV3, no MV2 keys, every named file exists, icons are real PNGs at the declared sizes, narrow permissions, content script excludes identity providers, CSP forbids remote and inline script, shortcuts declared |
+| Parsing | every shipped script is parsed as a module, the way Chrome parses it. This exists because a syntax error once passed a full green suite: every other check here is a regular expression over the text, and a regular expression cannot see a duplicate declaration |
 | Static safety | no eval or `new Function`, no remote script, no `innerHTML` in the panel or bubble, no inline script or handlers in the HTML, content script never touches a token, worker refuses a token to a tab, external messages only from the Dolluz origin, links restricted to http and https, state from `crypto` |
 | Handoff | distinct state every time, state stored and URL built, real code exchanged for real tokens, no token in the redirect, code not reusable, unlisted extension refused, state mismatch refused without a network call, expired state refused, refusal surfaced |
 | Where it points | production with nothing configured, production when storage itself fails, a local server accepted and reported as not production, plain http refused for every host but this machine, both bases required together, clearing returns to production, the manifest holds localhost only as an optional host |

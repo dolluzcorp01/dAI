@@ -122,3 +122,11 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | `extension/src/shared/config.js` | `matchPattern()` | One place that knows a Chrome match pattern carries no port. The popup and the worker both use it. |
 | `extension/src/background/service-worker.js` | `// dAI:` checks the host permission before starting sign in, and reports it over `kody:endpoints` | Without it the person signs in, the server mints a code, and the exchange fails with a bare network error. The evidence is an unconsumed row in `auth_codes` and a message that explains nothing. |
 | `extension/src/popup/popup.js` | the Server line says when access has not been granted | The state that decides whether sign in can work was invisible. |
+
+## A syntax error shipped past a green suite (2026-10-01)
+
+| File | Change | Why |
+|---|---|---|
+| `extension/src/background/service-worker.js` | removed a duplicate `const { isProduction }` | The previous change destructured it at the top of `signIn`, where the tab fallback already declared it further down. Chrome disabled the extension: a worker that will not parse does not run at all. |
+| `extension/build.js` | `// dAI:` every shipped `.js` is parsed, not just grepped | 581 tests passed on a file Chrome refused to load, because every check was a regular expression over the text and nothing ever asked a parser. Each file is parsed as a module, which is what Chrome does. |
+| `server/tests/extension.test.js` | the same check as a test | So `npm test` catches it too, not only the build. Putting the duplicate back fails both, with the message Chrome printed. |

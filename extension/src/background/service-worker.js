@@ -90,8 +90,7 @@ async function signIn() {
   // Fallback: open a tab and wait for the site to hand the code back. This only
   // completes on the production site, which is the one externally_connectable
   // names; against a local server there is nothing to receive the code, so say
-  // so rather than leave a tab sitting there.
-  const { isProduction } = await endpoints();
+  // so rather than leave a tab sitting there. isProduction is already in scope.
   if (!isProduction) {
     return {
       ok: false,

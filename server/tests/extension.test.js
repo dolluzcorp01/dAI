@@ -177,6 +177,42 @@ describe("static safety", () => {
     auth: code(readExt("src/shared/auth.js")),
   };
 
+  test("every shipped script actually parses", () => {
+    // Everything else in this group is a regular expression over the text. A
+    // regular expression cannot see a duplicate declaration, and Chrome's
+    // answer to a worker that will not parse is to disable the extension. So
+    // this one asks a parser, the way Chrome does.
+    const { execFileSync } = require("node:child_process");
+    const os = require("node:os");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kody-parse-test-"));
+    const scripts = [];
+    const walk = (at) => {
+      for (const entry of fs.readdirSync(at, { withFileTypes: true })) {
+        const full = path.join(at, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith(".js")) scripts.push(full);
+      }
+    };
+    walk(path.join(EXT, "src"));
+    assert.ok(scripts.length >= 8, `only found ${scripts.length} scripts to parse`);
+
+    const broken = [];
+    for (const file of scripts) {
+      // .mjs so node parses it as a module, which is what Chrome does.
+      const tmp = path.join(dir, path.basename(file) + ".mjs");
+      fs.writeFileSync(tmp, fs.readFileSync(file));
+      try {
+        execFileSync(process.execPath, ["--check", tmp], { stdio: "pipe" });
+      } catch (err) {
+        const text = String(err.stderr || err.message);
+        const line = text.split("\n").find(l => /SyntaxError/.test(l)) || "did not parse";
+        broken.push(`${path.relative(EXT, file)}: ${line.trim()}`);
+      }
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+    assert.deepEqual(broken, [], `these would not load in Chrome: ${broken.join("; ")}`);
+  });
+
   test("no file uses eval or the Function constructor", () => {
     for (const [name, src] of Object.entries(files)) {
       assert.ok(!/\beval\s*\(/.test(src), `${name} uses eval`);

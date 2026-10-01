@@ -64,6 +64,26 @@ for (const name of SDK_FILES) {
   }
 }
 
+/* Every shipped script must actually parse.
+   This exists because a syntax error once shipped past a full green suite: every
+   check was a regular expression over the text, and nothing ever asked a parser.
+   Chrome's answer to an unparsable worker is to disable the extension. */
+const os = require("os");
+const parseDir = fs.mkdtempSync(path.join(os.tmpdir(), "kody-parse-"));
+const parses = (rel) => {
+  // .mjs so node parses it as a module, which is what Chrome does.
+  const tmp = path.join(parseDir, path.basename(rel) + ".mjs");
+  fs.writeFileSync(tmp, fs.readFileSync(path.join(ROOT, rel)));
+  try {
+    execSync(`"${process.execPath}" --check "${tmp}"`, { stdio: "pipe" });
+    return null;
+  } catch (err) {
+    const text = String(err.stderr || err.stdout || err.message);
+    const line = text.split("\n").find(l => /SyntaxError|Error:/.test(l)) || "did not parse";
+    return line.trim();
+  }
+};
+
 /* nothing in the shipped tree may load remote code */
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
   const full = path.join(dir, e.name);
@@ -74,6 +94,10 @@ const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => 
 for (const full of walk(path.join(ROOT, "src"))) {
   const rel = path.relative(ROOT, full);
   const src = read(rel);
+  if (rel.endsWith(".js")) {
+    const problem = parses(rel);
+    if (problem) problems.push(`${rel} does not parse: ${problem}`);
+  }
   if (/\beval\s*\(|new\s+Function\s*\(/.test(src)) problems.push(`${rel} uses eval or new Function`);
   if (/importScripts\s*\(/.test(src)) problems.push(`${rel} uses importScripts`);
   if (/src=["']https?:\/\//.test(src)) problems.push(`${rel} references a remote script or style`);
@@ -109,6 +133,8 @@ if ((manifest.host_permissions || []).some(h => h === "<all_urls>" || h === "*:/
 if (!manifest.content_security_policy || !manifest.content_security_policy.extension_pages) {
   warnings.push("no explicit extension_pages CSP; Chrome's default is used");
 }
+
+fs.rmSync(parseDir, { recursive: true, force: true });
 
 /* report */
 console.log(`Kody extension ${manifest.version}`);

@@ -181,6 +181,11 @@ by a real person. PENDING = not started. Update this table at the end of every s
            then proved by adding a fetch to the panel and watching it fail. All 140 tracked
            text files are now scanned for control bytes and are clean.
          - NOT verified: no browser has rendered this page either.
+         The done-check also found the gap in how this area was tested: a duplicate
+         declaration in the service worker passed 581 green tests and then stopped the
+         extension loading at all, because every check was a regular expression over the
+         text. build.js and the suite now parse every shipped script as a module, which is
+         what Chrome does. Full suite 581/581 twice.
          The first done-check attempt found the one that mattered: 1.1 put dAdmin in front of
          login and missed authorize, which is what the sign in page calls. authorize checked
          local Kody credentials only, and a real employee has none, so the extension could
