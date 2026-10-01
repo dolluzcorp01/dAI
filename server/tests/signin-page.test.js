@@ -53,7 +53,7 @@ after(async () => {
  * Enough DOM for this page and no more. Every id the HTML declares exists, so
  * a typo in the page shows up as a missing element rather than passing.
  */
-function fakeDom({ state, redirectUri }) {
+function fakeDom({ state, redirectUri, fetchImpl }) {
   // Start each element where the HTML starts it, hidden attribute included:
   // the page relies on #refused and #handoff being hidden until it says so.
   const tags = [...PAGE_HTML.matchAll(/<[a-z0-9]+[^>]*\bid="([a-z0-9-]+)"[^>]*>/g)];
@@ -66,15 +66,27 @@ function fakeDom({ state, redirectUri }) {
     id,
     textContent: "",
     value: "",
+    type: id === "password" ? "password" : "",
     hidden: hiddenAtStart.has(id),
     disabled: false,
     children: [],
     focused: false,
+    attributes: new Map(attributesInHtml(id)),
     focus() { this.focused = true; },
+    getAttribute(name) { return this.attributes.has(name) ? this.attributes.get(name) : null; },
+    setAttribute(name, value) { this.attributes.set(name, String(value)); },
     appendChild(child) { this.children.push(child); return child; },
     addEventListener(type, fn) { handlers.set(`${id}:${type}`, fn); },
   });
   for (const id of ids) elements.set(id, makeElement(id));
+
+  // Start from the attributes the HTML declares, so aria-pressed is "false"
+  // here because the markup says so, not because the stub guessed.
+  function attributesInHtml(id) {
+    const tag = tags.find(m => m[1] === id);
+    if (!tag) return [];
+    return [...tag[0].matchAll(/([a-z-]+)="([^"]*)"/g)].map(m => [m[1], m[2]]);
+  }
 
   const navigations = [];
   const search = `?state=${encodeURIComponent(state)}`
@@ -95,7 +107,7 @@ function fakeDom({ state, redirectUri }) {
     URLSearchParams,
     console,
     // The page uses relative paths, as a page served from this origin does.
-    fetch: (url, options) => fetch(`${base}${url}`, options),
+    fetch: fetchImpl || ((url, options) => fetch(`${base}${url}`, options)),
   };
   context.window = context;
 
@@ -223,6 +235,84 @@ describe("signing in, against the real server", () => {
     await dom.fire("forgot", "click");
     assert.match(dom.el("error").textContent, /Dolluz sign-in password/);
     assert.ok(!/no account|not found|unknown/i.test(dom.el("error").textContent));
+  });
+});
+
+describe("the password field behaves like dAdmin's", () => {
+  test("the eye shows and hides, and says which it will do", async () => {
+    const dom = fakeDom({ state: "f".repeat(24), redirectUri: CALLBACK });
+    const eye = dom.el("toggle-password");
+    const field = dom.el("password");
+
+    assert.equal(field.type, "password");
+    assert.equal(eye.getAttribute("aria-pressed"), "false");
+    assert.equal(eye.getAttribute("aria-label"), "Show password");
+    assert.equal(eye.getAttribute("tabindex"), "-1", "the eye must stay out of the tab order");
+
+    await dom.fire("toggle-password", "click");
+    assert.equal(field.type, "text");
+    assert.equal(eye.getAttribute("aria-pressed"), "true");
+    assert.equal(eye.getAttribute("aria-label"), "Hide password");
+
+    await dom.fire("toggle-password", "click");
+    assert.equal(field.type, "password");
+    assert.equal(eye.getAttribute("aria-label"), "Show password");
+  });
+
+  test("Caps Lock is called out, because it is why a right password gets typed wrong", async () => {
+    const dom = fakeDom({ state: "g".repeat(24), redirectUri: CALLBACK });
+    assert.equal(dom.el("caps").hidden, true);
+
+    await dom.fire("password", "keyup", { getModifierState: (k) => k === "CapsLock" });
+    assert.equal(dom.el("caps").hidden, false);
+
+    await dom.fire("password", "keyup", { getModifierState: () => false });
+    assert.equal(dom.el("caps").hidden, true);
+  });
+});
+
+describe("no answer is not the same as a refusal", () => {
+  test("a server that is not there does not blame the password", async () => {
+    const dom = fakeDom({
+      state: "h".repeat(24), redirectUri: CALLBACK,
+      fetchImpl: () => Promise.reject(new TypeError("Failed to fetch")),
+    });
+    dom.el("email").value = EMAIL;
+    dom.el("password").value = PASSWORD;
+    await dom.fire("form", "submit");
+
+    const said = dom.el("error").textContent;
+    assert.match(said, /did not answer/);
+    assert.match(said, /was not checked/, "it must say the password was never tested");
+    assert.ok(!/password is not right|incorrect/i.test(said), `it blamed the password: ${said}`);
+    assert.equal(dom.navigations.length, 0);
+    assert.equal(dom.el("submit").disabled, false);
+  });
+
+  test("a broken server says so, and does not blame the password either", async () => {
+    const dom = fakeDom({
+      state: "i".repeat(24), redirectUri: CALLBACK,
+      fetchImpl: () => Promise.resolve({
+        ok: false, status: 502,
+        json: () => Promise.reject(new SyntaxError("not JSON")),
+      }),
+    });
+    dom.el("email").value = EMAIL;
+    dom.el("password").value = PASSWORD;
+    await dom.fire("form", "submit");
+
+    const said = dom.el("error").textContent;
+    assert.match(said, /502/, "the status is what makes this diagnosable");
+    assert.ok(!/password is not right/i.test(said), `it blamed the password: ${said}`);
+  });
+
+  test("a refused credential still says exactly that", async () => {
+    const dom = fakeDom({ state: "j".repeat(24), redirectUri: CALLBACK });
+    dom.el("email").value = EMAIL;
+    dom.el("password").value = "not the password";
+    await dom.fire("form", "submit");
+    assert.match(dom.el("error").textContent, /not right/);
+    assert.ok(!/did not answer/.test(dom.el("error").textContent));
   });
 });
 

@@ -6,7 +6,7 @@ by a real person. PENDING = not started. Update this table at the end of every s
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Assemble the 15 modules, fill what they never shipped, pass the suite on real MySQL 8 + Redis | DONE |
-| 1 | Sign-in through dAdmin, the extension client (Ask Kody), SME loop with notifications, dAI admin pages in dAdmin | 1.1, 1.2, 1.3 DONE. 1.4a-d DONE, awaiting the Chrome done-check. 1.5 is dAdmin |
+| 1 | Sign-in through dAdmin, the extension client (Ask Kody), SME loop with notifications, dAI admin pages in dAdmin | 1.1 to 1.4 DONE, Chrome done-check PASSED 2026-10-01. 1.5 is dAdmin |
 | 2 | Team chat, files with virus scan, search, notifications UI, daily digest by SendGrid | BUILT on the server, UI PENDING |
 | 3 | Chrome extension: packaging and the Web Store listing. The missing files and the real browser test moved into 1.4 | PENDING |
 | 4 | Production on DigitalOcean: droplet, managed MySQL, Spaces, Redis, ClamAV, Caddy, first real Claude call, CMS code import | PENDING |
@@ -202,6 +202,32 @@ by a real person. PENDING = not started. Update this table at the end of every s
     Done-check for 1.4 as a whole, in a real Chrome: load the unpacked extension, sign in
     with a dAdmin password, click the bubble, ask CO-45 and a general question, thumbs down
     one, and see it reach the dAdmin SME queue. Screenshots of each step.
+    PASSED 2026-10-01, run by Shoban in Chrome against a local server, extension id
+    llfpaneificjjjedekfkimpakmkjdmie loaded unpacked, API and site both http://localhost:4014.
+    Steps 2 to 9 all passed: signed in with the dAdmin password (DZIND148), CO-45 came back
+    as a verified CARC lookup in 28ms, thumbs up credited 25 cheer points, Saved, History,
+    Chats and the recent codes strip behaved, and the bubble appeared on
+    dadmin.dolluzcorp.com. Screenshots held by Shoban.
+    The thumbs down reached the queue: sme_queue id 141, status open, raised by
+    tigerboogipinky@gmail.com (DZIND148) at 2026-10-01T05:12:48Z, kody_messages 3112, domain
+    rcm, tier 0, confidence high. It notified 2 real reviewers, vignesh (coordinator) and
+    shoban (super_admin), with title "SME review" and a body naming only the domain: no
+    question text and no answer text, which is rule 17 holding in production use. The other
+    278 recipients are test accounts this development database has accumulated from the
+    suite, not a product behaviour.
+    What the done-check found that no test had: five faults, four of them in paths no test
+    covered and one a hole in the testing itself.
+      1. authorize never asked dAdmin, so no real employee could sign in through the
+         extension at all. The decisive one.
+      2. identity is an optional permission, so chrome.identity did not exist until granted.
+      3. A Chrome match pattern may not carry a port, so the host permission request was
+         rejected outright.
+      4. Changing server kept the previous server's tokens.
+      5. A duplicate declaration stopped the worker loading, and 581 green tests could not
+         see it because every check was a regular expression over the text. build.js and the
+         suite now parse every shipped script as a module, which is what Chrome does.
+    The lesson for the remaining phases: a browser check finds what a test suite built from
+    the same assumptions cannot, so it belongs before an item is called done, not after.
 1.5 dAdmin dAI pages (separate repo, see PROMPT_dAdmin.md)
 
 ## Known gaps carried forward (do not lose these)

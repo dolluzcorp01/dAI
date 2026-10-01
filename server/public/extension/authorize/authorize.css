@@ -84,6 +84,39 @@ body {
 
 .field:focus { border-color: var(--gold); }
 
+/* password field with the eye toggle, as dAdmin draws it */
+
+.passwrap { position: relative; }
+
+.passwrap .field { padding-right: 36px; }
+
+.passtoggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 36px;
+  width: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.passtoggle:hover { color: var(--ink); }
+.passtoggle .eye-off { display: none; }
+.passtoggle[aria-pressed="true"] .eye { display: none; }
+.passtoggle[aria-pressed="true"] .eye-off { display: block; }
+
+.caps {
+  margin: 0 0 10px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--gold-deep);
+}
+
 .primary {
   width: 100%;
   margin-top: 2px;

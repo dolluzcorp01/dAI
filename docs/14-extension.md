@@ -176,6 +176,16 @@ What that leaves unproven:
 The first hour with Chrome will find things. That is expected, and the
 structure is built so those fixes are local.
 
+**It did.** The done-check on 2026-10-01 passed, and found five faults first:
+`authorize` never asked dAdmin so no real employee could sign in through the
+extension; `identity` is optional so `chrome.identity` did not exist until
+granted; a Chrome match pattern may not carry a port so the host permission
+request was rejected; changing server kept the old server's tokens; and a
+duplicate declaration stopped the worker loading while 581 green tests saw
+nothing, because every check here was a regular expression over the text.
+Four of those were in paths no test covered. The fifth was a hole in the
+testing itself, and is why every shipped script is now parsed.
+
 ---
 
 ## Which server it talks to

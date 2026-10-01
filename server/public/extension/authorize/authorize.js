@@ -63,6 +63,34 @@ if (!callback || state.length < 8) {
   $("email").focus();
 }
 
+/* ---------------- show, hide, and Caps Lock ---------------- */
+
+/**
+ * The same behaviour as dAdmin's sign in page: the eye swaps the field between
+ * password and text, it is out of the tab order, and it says which it will do
+ * rather than what it is. Caps Lock is the reason a correct password gets typed
+ * wrong, so the page says so instead of letting the server refuse it.
+ */
+const toggle = $("toggle-password");
+
+toggle.addEventListener("click", () => {
+  const showing = toggle.getAttribute("aria-pressed") === "true";
+  toggle.setAttribute("aria-pressed", showing ? "false" : "true");
+  toggle.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+  $("password").type = showing ? "password" : "text";
+  $("password").focus();
+});
+
+function capsCheck(event) {
+  let on = false;
+  try { on = !!(event.getModifierState && event.getModifierState("CapsLock")); } catch (_) { on = false; }
+  $("caps").hidden = !on;
+}
+
+$("password").addEventListener("keyup", capsCheck);
+$("password").addEventListener("keydown", capsCheck);
+$("password").addEventListener("blur", () => { $("caps").hidden = true; });
+
 /* ---------------- signing in ---------------- */
 
 function fail(message) {
@@ -91,33 +119,45 @@ $("form").addEventListener("submit", async (event) => {
 
   $("submit").disabled = true;
   $("submit").textContent = "Signing in...";
+  const ready = () => { $("submit").disabled = false; $("submit").textContent = "Sign in"; };
 
-  let res, body;
+  // No answer at all is a different thing from an answer that says no, and
+  // saying the wrong one sends people hunting for a password that was fine.
+  // So the request and the reading of the reply are separate steps.
+  let res;
   try {
     res = await fetch("/api/auth/authorize", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, state, redirect_uri: redirectUri, surface }),
     });
-    body = await res.json();
   } catch (_) {
-    $("submit").disabled = false;
-    $("submit").textContent = "Sign in";
-    fail("Could not reach Kody. Check your connection and try again.");
+    ready();
+    fail("Kody did not answer. The server may be down, or the connection dropped. "
+      + "Your password was not checked.");
     return;
   }
+
+  let body = null;
+  try { body = await res.json(); } catch (_) { body = null; }
 
   // Whatever happens next, the password does not stay in the page.
   $("password").value = "";
+  $("caps").hidden = true;
 
-  if (!res.ok || !body || !body.code) {
-    $("submit").disabled = false;
-    $("submit").textContent = "Sign in";
-    fail(MESSAGES[body && body.error] || (body && body.message) || "Could not sign in.");
+  if (res.ok && body && body.code) {
+    handOff(body.code);
     return;
   }
 
-  handOff(body.code);
+  ready();
+  if (body && body.error && MESSAGES[body.error]) { fail(MESSAGES[body.error]); return; }
+  if (body && body.message) { fail(body.message); return; }
+  if (res.status >= 500) {
+    fail(`Kody answered with an error (${res.status}). Nothing was signed in. Try again shortly.`);
+    return;
+  }
+  fail(`Could not sign in (${res.status}).`);
 });
 
 /**

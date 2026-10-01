@@ -130,3 +130,10 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | `extension/src/background/service-worker.js` | removed a duplicate `const { isProduction }` | The previous change destructured it at the top of `signIn`, where the tab fallback already declared it further down. Chrome disabled the extension: a worker that will not parse does not run at all. |
 | `extension/build.js` | `// dAI:` every shipped `.js` is parsed, not just grepped | 581 tests passed on a file Chrome refused to load, because every check was a regular expression over the text and nothing ever asked a parser. Each file is parsed as a module, which is what Chrome does. |
 | `server/tests/extension.test.js` | the same check as a test | So `npm test` catches it too, not only the build. Putting the duplicate back fails both, with the message Chrome printed. |
+
+## After the done-check (2026-10-01)
+
+| File | Change | Why |
+|---|---|---|
+| `server/public/extension/authorize/*` | the eye toggle and a Caps Lock hint | dAdmin's sign in page has both. The one thing people do on both pages now behaves the same way: the eye swaps the field, stays out of the tab order, carries `aria-pressed`, and says which it will do rather than what it is. Caps Lock is why a correct password gets typed wrong. |
+| `server/public/extension/authorize/authorize.js` | the request and the reading of the reply are separate steps | A failed request and a refused credential were one branch, so a server that never answered could be reported as a bad password. No answer, an answer that refuses, and an answer that breaks are now three different messages, and the broken one carries the status. |
