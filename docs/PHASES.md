@@ -231,6 +231,10 @@ by a real person. PENDING = not started. Update this table at the end of every s
 1.5 dAdmin dAI pages (separate repo, see PROMPT_dAdmin.md)
 
 ## Known gaps carried forward (do not lose these)
+- No retention anywhere. Nothing prunes notifications, digest_runs or audit_log, and the
+  retention setting on conversations and spaces is stored and read but never acted on. A
+  setting that does nothing is worse than no setting, because someone will set it and
+  believe it. Logged 2026-10-01 during Phase 4 provisioning.
 - The quick switcher reads the 200 most recently active conversations and filters those in
   JavaScript (search.service.js). Someone in more than 200 conversations cannot find an
   older one by typing its name, and it fails silently: the list simply does not contain it.

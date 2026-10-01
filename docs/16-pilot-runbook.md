@@ -22,7 +22,7 @@ One droplet, `64.227.135.222`, shared with twelve other dApps:
 | Disk | 23 GB, **92% full** |
 | Stack | pm2 behind nginx, certbot for TLS, MySQL on the same box |
 | Ports | 4000 to 4010 taken by twelve dApps. **dAI gets 4011** |
-| Node | v18.19.1 system-wide. dAI needs 22, so 22 goes alongside via nvm |
+| Node | v18.19.1 system-wide. dAI needs 22, so 22 goes alongside via nvm, with nvm's default put back to the system Node |
 
 Two things follow from this, and both are decisions rather than preferences.
 
@@ -84,11 +84,37 @@ The box runs v18.19.1 for the other dApps. **Do not upgrade the system Node.**
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
 source ~/.nvm/nvm.sh
 nvm install 22
-nvm which 22        # note the path
-node -v             # in this shell only
 ```
 
-pm2 runs dAI with that interpreter; nothing else changes.
+**Then immediately put the default back, before anything else happens:**
+
+```bash
+nvm alias default system
+```
+
+**This step is not optional and the order matters.** The nvm installer appends
+itself to `~/.bashrc`, so from that moment every new root shell starts on Node
+22, in every directory, for every app on the box. A pm2 restart from such a
+shell would relaunch another dApp on Node 22 without anyone deciding to. Found
+on 2026-10-01 during the real provisioning, before it did any harm.
+
+Verify it, in a new shell rather than this one:
+
+```bash
+exit            # and log in again
+node -v         # expect v18.19.1, the system Node
+nvm which 22    # the path to the Node 22 binary, which is what dAI uses
+```
+
+Nothing on the box is now on Node 22 by default. dAI gets there explicitly:
+
+- **pm2** uses the `interpreter` line in `ecosystem.config.js`.
+- **deploy.sh** puts that directory at the front of `PATH` and refuses to run if
+  `node -v` is not 22 or newer.
+
+Both default to `/root/.nvm/versions/node/v22.23.3/bin`. If nvm installs a
+different patch version, set `DAI_NODE` for pm2 and `DAI_NODE_BIN` for
+deploy.sh, or edit the two defaults.
 
 ### Redis
 
@@ -204,6 +230,27 @@ MODEL_FALLBACK_PROVIDER=
 Production refuses to start on a configuration that looks fine and fails
 quietly, so if anything above is wrong the process will say so and stop rather
 than run half-configured. That is the intended behaviour, not a fault.
+
+---
+
+### What the install costs
+
+Measured on the real package set, because this box has little room to spare:
+
+| Operation | Peak memory | Time |
+|---|---|---|
+| `npm ci --omit=dev` | **228 MB** | ~20 s on a laptop, longer here |
+| `node scripts/migrate.js` | 40 MB | seconds |
+| dAI running | 66 to 84 MB | |
+
+**The install is the only spike, and there is no build step at all**: no
+bundler, no React, nothing to compile. 246 packages, 68 MB on disk.
+
+228 MB on a box with little free memory will touch swap for a minute. Do it
+after the resize if you can. If you cannot, two things help: it is a short
+window rather than a sustained load, and `node_modules` contains **no native
+binaries**, so it can be installed on another machine and copied over if the
+box cannot spare the memory at all.
 
 ---
 
@@ -384,5 +431,11 @@ Everything in this list is a thing nobody has watched happen:
   window the next refresh closes.
 - The quick switcher reads only the 200 most recently active conversations
   before filtering, so a heavy user cannot find an older one by name.
+- **Nothing prunes anything.** There is no retention job for notifications,
+  `digest_runs` or `audit_log`, and no code acts on the `retention` setting that
+  conversations and spaces carry. In development, notifications reached 134,869
+  rows and 40 MB at 314 bytes a row. A pilot of a few people will not trouble a
+  3.8 GB disk, but nothing stops it and nobody is watching it, and the first
+  place it hurts is the nightly dump, which is on the same disk.
 
 The first three are where the trouble will come from.

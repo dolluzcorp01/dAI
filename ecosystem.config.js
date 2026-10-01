@@ -31,6 +31,17 @@ module.exports = {
       instances: 1,
       exec_mode: "fork",
 
+      // The box runs Node 18 for the other twelve dApps and 22 only for this
+      // one, installed alongside through nvm. nvm's default is deliberately set
+      // back to the system Node, so WITHOUT this line pm2 would launch dAI on
+      // 18, where --env-file-if-exists does not exist and package.json engines
+      // says no. Pinning the interpreter is what keeps dAI on 22 without any
+      // other app being moved onto it.
+      //
+      // Override with DAI_NODE if the nvm version changes.
+      interpreter: process.env.DAI_NODE
+        || "/root/.nvm/versions/node/v22.23.3/bin/node",
+
       // V8 sizes its heap from total system memory, which on a 1 GB box shared
       // with twelve apps is far more than this one should ever take. Cap it.
       //

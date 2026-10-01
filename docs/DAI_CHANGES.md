@@ -185,3 +185,19 @@ twelve other dApps on 1 vCPU and 1 GB.
 | `deploy/docker/` | parked, with a README | Keeps the two-replica reasoning for a box where it can be proven. |
 | `docs/16-pilot-runbook.md` | new | Provisioning, first deploy on mock, the first real model call, the imports, backups against a 92% full disk, and rollback. |
 | `server/tests/unanswered-dismiss.test.js` | reads where the panel cut is, and deletes its own threads afterwards | It asked 20 times to rank in a 50 row panel. Every run left a 20 behind, the fiftieth row climbed to 20, and the suite began tying with its own history and losing an arbitrary tie-break. A suite that cannot be run twice is not a test. |
+
+## Node 22 pinned where dAI starts (2026-10-01)
+
+Found during real provisioning: the nvm installer appends itself to root's
+`.bashrc`, so every new root shell defaulted to Node 22 for every app on the
+box, and a pm2 restart from such a shell would have relaunched another dApp on
+22. Shoban caught it and set `nvm alias default system`.
+
+That fix has a second half, which was missing here: with the default back to
+Node 18, nothing would have started dAI on 22.
+
+| File | Change | Why |
+|---|---|---|
+| `ecosystem.config.js` | `// dAI:` `interpreter`, overridable with `DAI_NODE` | Without it pm2 launches dAI on whatever `node` means in its shell, which is now 18, where `--env-file-if-exists` does not exist. |
+| `deploy/deploy.sh` | pins `PATH` and refuses anything below Node 22 | Migrations on Node 18 would run with no environment at all and fail in a way that reads like a database fault. |
+| `docs/16-pilot-runbook.md` | `nvm alias default system` immediately after `nvm install`, with the reason and a verification in a fresh shell | The window between installing nvm and fixing the default is the dangerous part. |

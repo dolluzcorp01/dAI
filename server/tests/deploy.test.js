@@ -439,6 +439,46 @@ describe("production configuration guards", () => {
   });
 });
 
+describe("the deploy pins Node 22, because the box is not on it", () => {
+  // The server runs Node 18 for twelve other dApps and 22 only for dAI. nvm's
+  // default is deliberately the system Node, so nothing reaches 22 by accident.
+  // That means dAI has to reach it on purpose, in both places that start it.
+  const REPO = path.join(__dirname, "..", "..");
+  const read = (rel) => fs.readFileSync(path.join(REPO, rel), "utf8");
+
+  test("pm2 is told which interpreter to use", () => {
+    const eco = read("ecosystem.config.js");
+    assert.match(eco, /interpreter:/,
+      "without this pm2 launches dAI on whatever node means in its shell, which is 18");
+    assert.match(eco, /DAI_NODE/, "the path should be overridable when nvm moves");
+    assert.match(eco, /v22\./, "the default should name a Node 22 binary");
+  });
+
+  test("deploy.sh pins the path and refuses an older node", () => {
+    const sh = read("deploy/deploy.sh");
+    assert.match(sh, /DAI_NODE_BIN/, "deploy.sh does not pin a node");
+    assert.match(sh, /PATH="\$DAI_NODE_BIN:\$PATH"/, "the pinned node is not put first");
+
+    // The refusal matters more than the pin: Node 18 has no
+    // --env-file-if-exists, so migrations would run with no environment and
+    // fail in a way that reads like a database fault.
+    // Asserting that a variable called NODE_VERSION exists would pass against a
+    // script that assigns it a constant. What matters is that the version is
+    // read from the node that is about to be used.
+    const gate = sh.indexOf("node -v");
+    const migrate = sh.indexOf("scripts/migrate.js");
+    assert.ok(gate > 0, "deploy.sh never asks node what version it is");
+    assert.ok(gate < migrate, "it checks the version after migrating, which is too late");
+    assert.match(sh, /needs 22 or newer/);
+    assert.match(sh, /v2\[2-9\]|v2[2-9]/, "there is no version comparison, only a message");
+  });
+
+  test("the engine requirement the pin exists to satisfy is still declared", () => {
+    const pkg = JSON.parse(read("server/package.json"));
+    assert.match(pkg.engines.node, /22/, "if this drops, the pin is guarding nothing");
+  });
+});
+
 describe("file sharing turned off", () => {
   const { createStorage, NoStorage } = require("../src/lib/storage");
 
