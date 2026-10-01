@@ -522,10 +522,28 @@ async function pointsBalance(userId) {
 
 /* ---------------- SME queue ---------------- */
 
+/** The configured business day offset, as minutes east of UTC. */
+function dayOffsetMinutes() {
+  const text = String(config.businessDay.offset || "+05:30").trim();
+  const m = /^([+-])(\d{2}):?(\d{2})$/.exec(text);
+  if (!m) throw new Error(`BUSINESS_DAY_OFFSET is not an offset like +05:30: ${text}`);
+  const minutes = Number(m[2]) * 60 + Number(m[3]);
+  return m[1] === "-" ? -minutes : minutes;
+}
+
 /**
  * dAI: a day boundary from a date, so from and to mean whole days.
  *
- * Accepts YYYY-MM-DD, which is what a date picker sends, or a full timestamp.
+ * Every timestamp in this database is UTC: the pool sets time_zone to +00:00 on
+ * every connection. But a bare date is not an instant, it is a day somebody is
+ * thinking of, and our people are in India. So YYYY-MM-DD is read as an IST day
+ * and converted, rather than as midnight in whatever zone the server process
+ * happens to run in. That was the old behaviour and it meant the same request
+ * covered different hours on a laptop and on a droplet.
+ *
+ * A full timestamp is honoured as given. With an offset or a Z it is already an
+ * instant; without one it is read in the same business zone, not the server's.
+ *
  * A bare `to` covers the whole of that day, because asking for items up to the
  * 3rd and getting nothing from the 3rd is a trap.
  */
@@ -535,12 +553,30 @@ function queueBoundary(value, field, { endOfDay = false } = {}) {
   if (!bare && !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(text)) {
     throw new KodyError(400, "bad_date", `${field} must be a date, as YYYY-MM-DD.`);
   }
-  const at = new Date(bare ? `${text}T00:00:00` : text.replace(" ", "T"));
+
+  if (bare) {
+    const [y, mo, d] = text.split("-").map(Number);
+
+    // Date.UTC rolls over silently, so the 45th of the 13th month becomes a
+    // date in the following year instead of an error. Check before using it,
+    // and check the day asked for rather than the day after it.
+    const probe = new Date(Date.UTC(y, mo - 1, d));
+    if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== mo - 1 || probe.getUTCDate() !== d) {
+      throw new KodyError(400, "bad_date", `${field} is not a real date.`);
+    }
+
+    // Midnight of that day in the business zone, as the UTC instant it is.
+    const at = new Date(Date.UTC(y, mo - 1, d + (endOfDay ? 1 : 0)) - dayOffsetMinutes() * 60000);
+    return { at, exclusive: endOfDay };
+  }
+
+  const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/.test(text);
+  const iso = text.replace(" ", "T");
+  const at = new Date(zoned ? iso : `${iso}${config.businessDay.offset}`);
   if (Number.isNaN(at.getTime())) {
     throw new KodyError(400, "bad_date", `${field} is not a real date.`);
   }
-  if (bare && endOfDay) at.setDate(at.getDate() + 1);   // exclusive upper bound
-  return { at, exclusive: bare && endOfDay };
+  return { at, exclusive: false };
 }
 
 /**
@@ -554,6 +590,18 @@ function queueBoundary(value, field, { endOfDay = false } = {}) {
  * created_at alone is not a stable order, because two items raised in the same
  * second would swap between pages. id breaks the tie, in the same direction.
  */
+/**
+ * dAI: every value the column allows, plus "all".
+ *
+ * sme_queue.status is ENUM('open','in_review','resolved','rejected'), but the
+ * route accepted only open and resolved and quietly turned anything else into
+ * open. So an item being worked on, or rejected, could not be listed at all,
+ * and asking for one returned the open list as though that were the answer.
+ * Quietly correcting bad input is what hid it, so an unknown status is now
+ * refused rather than replaced.
+ */
+const SME_STATUSES = ["open", "in_review", "resolved", "rejected"];
+
 async function smeQueue({ status = "open", limit = 50, order = "newest", from, to } = {}) {
   const lim = Math.min(Math.max(Number(limit) || 50, 1), 200);
 
@@ -563,8 +611,18 @@ async function smeQueue({ status = "open", limit = 50, order = "newest", from, t
     throw new KodyError(400, "bad_order", "order must be newest or oldest.");
   }
 
-  const where = ["q.status = ?"];
-  const params = [status];
+  const wanted = String(status === undefined || status === null || status === "" ? "open" : status);
+  if (wanted !== "all" && !SME_STATUSES.includes(wanted)) {
+    throw new KodyError(400, "bad_status",
+      `status must be one of ${SME_STATUSES.join(", ")}, or all.`);
+  }
+
+  const where = [];
+  const params = [];
+  if (wanted !== "all") {
+    where.push("q.status = ?");
+    params.push(wanted);
+  }
   if (from !== undefined && from !== null && from !== "") {
     where.push("q.created_at >= ?");
     params.push(queueBoundary(from, "from").at);
@@ -587,7 +645,7 @@ async function smeQueue({ status = "open", limit = 50, order = "newest", from, t
        FROM sme_queue q
        JOIN kody_messages m ON m.id = q.kody_message_id
        LEFT JOIN users u ON u.id = q.raised_by
-      WHERE ${where.join(" AND ")}
+      WHERE ${where.length > 0 ? where.join(" AND ") : "1 = 1"}
       ORDER BY q.created_at ${direction}, q.id ${direction} LIMIT ?`,
     params
   );

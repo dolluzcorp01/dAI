@@ -231,6 +231,9 @@ by a real person. PENDING = not started. Update this table at the end of every s
 1.5 dAdmin dAI pages (separate repo, see PROMPT_dAdmin.md)
 
 ## Known gaps carried forward (do not lose these)
+- The SME queue date filter reads a bare date in BUSINESS_DAY_OFFSET, default +05:30, and
+  everything is stored in UTC. A fixed offset is exact for India. If dAI is ever used from a
+  zone with daylight saving, this needs a real time zone database rather than an offset.
 - exchangeCode issues a session from the one-time code without re-checking dAdmin. Found in
   the 1.4 audit on 2026-10-01. The window is the code's sixty second life, and every refresh
   after that re-checks dAdmin and revokes on access_revoked (1.1), so an employee whose

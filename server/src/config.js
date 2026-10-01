@@ -77,6 +77,17 @@ const config = {
     url: optional("REDIS_URL", ""),
   },
 
+  // dAI: the zone a bare date means (docs/PHASES.md 1.3). Everything is STORED
+  // in UTC: the pool sets time_zone to +00:00 on every connection. But "today"
+  // is a thing people say, and our people are in India, so a bare date in a
+  // filter is read as an IST day and converted. Without this it was read in
+  // whatever zone the server process happened to run in, which is IST on a
+  // laptop and UTC on a droplet: the same request meaning two different days.
+  // India has no daylight saving, so a fixed offset is exact.
+  businessDay: {
+    offset: optional("BUSINESS_DAY_OFFSET", "+05:30"),
+  },
+
   ai: {
     primaryProvider: optional("MODEL_PRIMARY_PROVIDER", "anthropic"),
     fallbackProvider: optional("MODEL_FALLBACK_PROVIDER", ""),

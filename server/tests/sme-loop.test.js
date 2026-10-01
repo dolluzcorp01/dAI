@@ -280,6 +280,72 @@ describe("the queue can be ordered and dated", () => {
     assert.equal(still.status, 200, "the queue survived");
   });
 
+  test("a bare date means an IST day, not a day in whatever zone the server runs in", async () => {
+    // Everything is stored UTC. An item raised at 02:00 IST on the 20th is
+    // 20:30 UTC on the 19th, and it must still answer to from=2026-02-20,
+    // because that is the day the person who raised it was living in.
+    const early = await raiseSmeItem(`Queue zone early ${stamp}`, reporter.token);
+    const late = await raiseSmeItem(`Queue zone late ${stamp}`, reporter.token);
+    await db.query("UPDATE sme_queue SET created_at = ? WHERE id = ?",
+      ["2026-02-19 20:30:00", early.smeQueueId]);    // 02:00 IST on the 20th
+    await db.query("UPDATE sme_queue SET created_at = ? WHERE id = ?",
+      ["2026-02-20 18:25:00", late.smeQueueId]);     // 23:55 IST on the 20th
+
+    const day = await api("GET",
+      "/api/kody/sme?status=open&from=2026-02-20&to=2026-02-20&limit=200", null, reviewer.token);
+    const got = day.body.items.map(i => i.id);
+    assert.ok(got.includes(early.smeQueueId),
+      "02:00 IST on the 20th is stored as the 19th in UTC and must still be the 20th here");
+    assert.ok(got.includes(late.smeQueueId),
+      "23:55 IST on the 20th must not spill into the 21st");
+
+    const before = await api("GET",
+      "/api/kody/sme?status=open&from=2026-02-19&to=2026-02-19&limit=200", null, reviewer.token);
+    assert.ok(!before.body.items.map(i => i.id).includes(early.smeQueueId),
+      "it belongs to the 20th, not the 19th");
+  });
+
+  test("an explicit instant is honoured as given, offset and all", async () => {
+    const item = await raiseSmeItem(`Queue explicit ${stamp}`, reporter.token);
+    await db.query("UPDATE sme_queue SET created_at = ? WHERE id = ?",
+      ["2026-03-05 10:00:00", item.smeQueueId]);     // 15:30 IST
+
+    const inside = await api("GET",
+      "/api/kody/sme?status=open&from=2026-03-05T15:00:00%2B05:30&to=2026-03-05T16:00:00%2B05:30&limit=200",
+      null, reviewer.token);
+    assert.ok(inside.body.items.map(i => i.id).includes(item.smeQueueId));
+
+    const outside = await api("GET",
+      "/api/kody/sme?status=open&from=2026-03-05T16:00:00%2B05:30&to=2026-03-05T17:00:00%2B05:30&limit=200",
+      null, reviewer.token);
+    assert.ok(!outside.body.items.map(i => i.id).includes(item.smeQueueId));
+  });
+
+  test("every status the column allows can be listed, and a wrong one is refused", async () => {
+    const item = await raiseSmeItem(`Queue status ${stamp}`, reporter.token);
+    await db.query("UPDATE sme_queue SET status = 'in_review' WHERE id = ?", [item.smeQueueId]);
+
+    const open = await api("GET", "/api/kody/sme?status=open&limit=200", null, reviewer.token);
+    assert.ok(!open.body.items.map(i => i.id).includes(item.smeQueueId));
+
+    const reviewing = await api("GET", "/api/kody/sme?status=in_review&limit=200", null, reviewer.token);
+    assert.equal(reviewing.status, 200);
+    assert.ok(reviewing.body.items.map(i => i.id).includes(item.smeQueueId),
+      "an item being worked on could not be listed at all before this");
+
+    await db.query("UPDATE sme_queue SET status = 'rejected' WHERE id = ?", [item.smeQueueId]);
+    const rejected = await api("GET", "/api/kody/sme?status=rejected&limit=200", null, reviewer.token);
+    assert.ok(rejected.body.items.map(i => i.id).includes(item.smeQueueId));
+
+    const all = await api("GET", "/api/kody/sme?status=all&limit=200", null, reviewer.token);
+    assert.equal(all.status, 200);
+    assert.ok(all.body.items.map(i => i.id).includes(item.smeQueueId));
+
+    const wrong = await api("GET", "/api/kody/sme?status=nonsense", null, reviewer.token);
+    assert.equal(wrong.status, 400, "an unknown status must be refused, not replaced");
+    assert.equal(wrong.body.error, "bad_status");
+  });
+
   test("the order is stable when two items share a second", async () => {
     await db.query("UPDATE sme_queue SET created_at = ? WHERE id IN (?,?)",
       ["2026-02-14 09:00:00", middle.smeQueueId, newer.smeQueueId]);

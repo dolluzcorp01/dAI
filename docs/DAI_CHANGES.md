@@ -147,3 +147,12 @@ Every one is marked `// dAI:` in the code where it touches a module file.
 | `web/src/api/endpoints.js` | `smeQueue(status, { order, from, to, limit })`, re-vendored into the extension | |
 | `server/src/lib/safe-error.js` | new | A mysql2 error carries `sql`, the statement with the values filled in. Proven, not assumed: a failing insert of a question naming a patient put the whole sentence in `err.sql`. This is the only thing allowed into a log: kind, driver code, errno, sqlState, a capped message and one frame from our own source. |
 | nine route handlers, `app.js`, `middleware/dadmin-service.js`, `server.js` | `// dAI:` `logError(...)` instead of `console.error(..., err)` | The audit named three. There were twelve. |
+
+## Three more from the dAdmin audit (2026-10-01)
+
+| File | Change | Why |
+|---|---|---|
+| `server/src/config.js`, `.env.example` | `BUSINESS_DAY_OFFSET`, default `+05:30` | A bare date was read as midnight in whatever zone the server process ran in: IST on a laptop, UTC on a droplet, so the same request covered different hours in different places. It is now an explicit, configured zone. Everything is still stored in UTC, which the pool enforces on every connection. |
+| `server/src/services/kody.service.js` | `queueBoundary` converts a business day to the UTC instant, and validates the date before rolling it | `Date.UTC` rolls the 45th of the 13th month into next year rather than failing, and the old check skipped the `to` side entirely. |
+| `server/src/lib/safe-error.js` | a driver error keeps code, errno and sqlState, and no message | `ER_DUP_ENTRY` reports the offending value. A small door is still a door. Ordinary errors keep their message, which is the point of having one. |
+| `server/src/services/kody.service.js`, `routes/kody.routes.js` | all four statuses, plus `all`, and an unknown one is refused | The column is `ENUM('open','in_review','resolved','rejected')` but the route mapped anything but open or resolved to open, so an item being worked on or rejected could not be listed, and asking for one returned the open list as though that were the answer. Quietly correcting bad input is what hid it. |

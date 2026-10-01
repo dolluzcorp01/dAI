@@ -34,6 +34,29 @@ describe("the describer", () => {
     assert.ok(!line.includes(PHI), `the patient detail is in the log line: ${line}`);
     assert.ok(!/INSERT INTO|SELECT |UPDATE |DELETE /.test(line), `a statement is in the line: ${line}`);
     assert.ok(!line.includes("VALUES"), "values reached the line");
+    assert.ok(!/Table /.test(line), "a driver message must not survive either");
+  });
+
+  test("a driver error keeps no message at all", () => {
+    // ER_DUP_ENTRY reports the offending value, and a value is a value.
+    const dup = new Error("ER_DUP_ENTRY: Duplicate entry for key uq_email");
+    dup.code = "ER_DUP_ENTRY";
+    dup.errno = 1062;
+    dup.sqlState = "23000";
+    dup.sqlMessage = "Duplicate entry jane.doe@clinic.example for key uq_email";
+    dup.message = "Duplicate entry jane.doe@clinic.example for key uq_email";
+
+    const line = describeError(dup);
+    assert.ok(!line.includes("jane.doe@clinic.example"), `the value is in the log: ${line}`);
+    assert.ok(!line.includes("Duplicate entry"), `the message survived: ${line}`);
+    assert.match(line, /ER_DUP_ENTRY/, "the code must stay, it is what says what happened");
+    assert.match(line, /errno 1062/);
+    assert.match(line, /sqlState 23000/);
+  });
+
+  test("an ordinary error keeps its message, which is the point of having one", () => {
+    const line = describeError(new Error("thread 12 has no answer to vote on"));
+    assert.match(line, /thread 12 has no answer to vote on/);
   });
 
   test("still says enough to find the fault", () => {
@@ -41,9 +64,10 @@ describe("the describer", () => {
     assert.match(line, /ER_NO_SUCH_TABLE/, "the driver code is what you search for");
     assert.match(line, /errno 1146/);
     assert.match(line, /sqlState 42S02/);
+    assert.match(line, /message withheld/, "and says why there is no message");
   });
 
-  test("caps the message, so nothing arrives by being long", () => {
+  test("caps an ordinary message, so nothing arrives by being long", () => {
     const err = new Error("x".repeat(5000) + PHI);
     const line = describeError(err);
     assert.ok(line.length < 700, `the line is ${line.length} characters`);

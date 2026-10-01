@@ -12,12 +12,25 @@
  * So nothing logs an error object. Everything logs this, which is the kind, the
  * driver's code and the message, and one frame to find it by.
  *
- * Known residue: a few MySQL messages echo one offending value, ER_DUP_ENTRY
- * being the obvious one. Our unique keys are ids and email addresses rather
- * than message bodies, so a question cannot arrive that way, and the message is
- * capped so nothing arrives at length.
+ * A driver error loses its message entirely, keeping only the code, errno and
+ * sqlState. ER_DUP_ENTRY echoes the offending value, and a value is a value: a
+ * small door is still a door. The code says what happened and the frame says
+ * where, which is what anyone reading the log is actually looking for.
  */
 const MAX_MESSAGE = 300;
+
+/**
+ * Is this from the database driver? Those are the ones whose text can carry a
+ * value. errno and sqlState are mysql2's; the code prefixes cover the connection
+ * and protocol errors, which arrive without either.
+ */
+function isDriverError(err) {
+  if (err.errno !== undefined && err.errno !== null) return true;
+  if (err.sqlState) return true;
+  if (err.sql !== undefined) return true;
+  return /^(ER_|PROTOCOL_|POOL_|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EPIPE)/
+    .test(String(err.code || ""));
+}
 
 /** The first frame inside our own source, which is the one worth having. */
 function firstAppFrame(stack) {
@@ -39,8 +52,13 @@ function describeError(err) {
   if (err.errno !== undefined && err.errno !== null) bits.push(`errno ${err.errno}`);
   if (err.sqlState) bits.push(`sqlState ${err.sqlState}`);
 
-  const message = String(err.message === undefined ? "" : err.message).slice(0, MAX_MESSAGE);
-  if (message) bits.push(message);
+  if (isDriverError(err)) {
+    // No message at all. The code already says what happened.
+    bits.push("message withheld: driver errors can echo a value");
+  } else {
+    const message = String(err.message === undefined ? "" : err.message).slice(0, MAX_MESSAGE);
+    if (message) bits.push(message);
+  }
 
   const frame = firstAppFrame(err.stack);
   if (frame) bits.push(`at ${frame}`);
@@ -53,4 +71,4 @@ function logError(label, err) {
   console.error(label, describeError(err));
 }
 
-module.exports = { describeError, logError, MAX_MESSAGE };
+module.exports = { describeError, logError, isDriverError, MAX_MESSAGE };

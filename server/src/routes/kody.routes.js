@@ -98,10 +98,11 @@ router.get("/codes/:code", wrap(async (req, res) => {
    dAI: order and the date window, so an expert can find today's items in a
    queue with fifty open ones (docs/PHASES.md 1.3). */
 router.get("/sme", sme, wrap(async (req, res) => {
-  const status = ["open", "resolved"].includes(req.query.status) ? req.query.status : "open";
   res.json({
     items: await kody.smeQueue({
-      status,
+      // dAI: the service validates. This used to map anything but open or
+      // resolved to open, which made in_review and rejected unlistable.
+      status: req.query.status === undefined ? "open" : req.query.status,
       limit: req.query.limit,
       order: req.query.order === undefined ? "newest" : req.query.order,
       from: req.query.from,
