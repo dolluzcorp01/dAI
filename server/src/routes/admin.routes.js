@@ -26,6 +26,7 @@ const SUB_ADMIN_READ_ONLY = new Set([
   "GET /analytics/models",
   "GET /analytics/unanswered",
   "GET /analytics/people",
+  "GET /model-routing",
   "GET /spaces",
   "GET /audit",
   "GET /audit/actions",
@@ -77,6 +78,15 @@ router.get("/analytics/domains", wrap(async (req, res) => {
 
 router.get("/analytics/tiers", wrap(async (req, res) => {
   res.json({ tiers: await analytics.byTier() });
+}));
+
+/* GET /api/admin/model-routing
+   dAI: which model answers at which tier, for the dAdmin Kody AI page. Read
+   only, and configuration only: no key material, and no flag saying whether a
+   key is present either, because whether the gateway works is a readiness
+   question and /health/ready answers it. */
+router.get("/model-routing", wrap(async (req, res) => {
+  res.json(admin.modelRouting());
 }));
 
 router.get("/analytics/models", wrap(async (req, res) => {

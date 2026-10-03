@@ -254,6 +254,79 @@ describe("reports", () => {
   });
 });
 
+describe("the model routing table", () => {
+  test("reports the tier to model mapping", async () => {
+    const r = await api("GET", "/api/admin/model-routing", null, admin.token);
+    assert.equal(r.status, 200);
+
+    const tiers = r.body.tiers;
+    assert.equal(tiers.length, 4);
+    assert.deepEqual(tiers.map(t => t.tier), [0, 1, 2, 3]);
+    assert.deepEqual(tiers.map(t => t.name), ["lookup", "fast", "standard", "deep"]);
+    for (const t of tiers.slice(1)) {
+      assert.ok(t.model && typeof t.model === "string", `tier ${t.tier} has no model`);
+    }
+  });
+
+  test("tier 0 reports no model, because it never calls one", () => {
+    // The rule this makes visible: a code is looked up in the code tables and
+    // never generated. A routing page that showed a model against tier 0 would
+    // say the opposite of what the product does.
+    const routing = require("../src/services/admin.service").modelRouting();
+    assert.equal(routing.tiers[0].tier, 0);
+    assert.equal(routing.tiers[0].model, null);
+    assert.match(routing.tiers[0].note, /no model call/);
+  });
+
+  test("it carries configuration and no secrets at all", async () => {
+    const r = await api("GET", "/api/admin/model-routing", null, admin.token);
+
+    // An exact shape rather than a list of words to look out for. A word list
+    // says what today's secret looks like; this fails on anything new being
+    // added, which is the case that matters.
+    assert.deepEqual(Object.keys(r.body).sort(), [
+      "fallbackProvider", "maxRetries", "maxTokens", "primaryProvider",
+      "promptVersion", "tiers", "webSearch",
+    ]);
+    for (const tier of r.body.tiers) {
+      const keys = Object.keys(tier).sort();
+      assert.ok(
+        keys.join(",") === "model,name,tier" || keys.join(",") === "model,name,note,tier",
+        `tier ${tier.tier} carries ${keys.join(", ")}`
+      );
+    }
+
+    assert.ok(!("keysPresent" in r.body),
+      "whether a key is configured is a readiness question, and /health/ready answers it");
+
+    // And the actual configured key values, whatever they are, are not in it.
+    const config = require("../src/config");
+    const body = JSON.stringify(r.body);
+    for (const key of [config.ai.anthropicKey, config.ai.openaiKey]) {
+      if (key && key.length >= 4) {
+        assert.ok(!body.includes(key), "a configured key value reached the payload");
+      }
+    }
+
+    assert.ok("fallbackProvider" in r.body, "null rather than absent when there is none");
+    assert.ok("promptVersion" in r.body, "so an answer can be traced to the prompt that made it");
+    assert.equal(typeof r.body.webSearch, "boolean");
+  });
+
+  test("a member may not", async () => {
+    const r = await api("GET", "/api/admin/model-routing", null, member.token);
+    assert.equal(r.status, 403);
+  });
+
+  test("it is read only", async () => {
+    for (const method of ["POST", "PATCH", "PUT", "DELETE"]) {
+      const r = await api(method, "/api/admin/model-routing", { tiers: [] }, admin.token);
+      assert.ok(r.status === 403 || r.status === 404 || r.status === 405,
+        `${method} returned ${r.status}, so routing may be writable`);
+    }
+  });
+});
+
 describe("settings", () => {
   test("lists only settings the console may write", async () => {
     const r = await api("GET", "/api/admin/settings", null, admin.token);

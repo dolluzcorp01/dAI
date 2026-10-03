@@ -91,6 +91,7 @@ describe("the read-only console panels", () => {
     ["GET", "/api/admin/spaces"],
     ["GET", "/api/admin/audit"],
     ["GET", "/api/admin/audit/actions"],
+    ["GET", "/api/admin/model-routing"],
   ];
   for (const [method, path] of allowed) {
     test(`${method} ${path} is allowed`, async () => {

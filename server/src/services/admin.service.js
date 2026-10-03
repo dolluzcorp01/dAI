@@ -3,6 +3,8 @@ const db = require("../db");
 const V = require("../lib/validate");
 const { audit } = require("./auth.service");
 const analytics = require("./analytics.service");
+const config = require("../config");         // dAI: the routing table reports what is configured
+const prompts = require("../ai/prompts");   // dAI: the routing table reports the prompt version
 
 /**
  * The rest of the admin console.
@@ -34,6 +36,41 @@ const text = (max) => (v) => {
   const s = String(v === undefined || v === null ? "" : v).trim();
   return s.length > 0 && s.length <= max ? s : null;
 };
+
+/**
+ * dAI: the routing table, read only, for the dAdmin Kody AI page.
+ *
+ * Which model answers at which tier lives in dAI's environment and code, so
+ * dAdmin cannot show it without asking. This says what is configured, and
+ * nothing about whether it works: no key material, and no "is a key present"
+ * flag either. Whether the model gateway is actually reachable is a readiness
+ * question, and /health/ready is where that belongs.
+ *
+ * Tier 0 reports model: null on purpose. It is answered from the code tables
+ * with no model call at all, and a page that shows the routing should show
+ * that, because it is the rule that codes are looked up and never generated.
+ */
+function modelRouting() {
+  return {
+    tiers: [
+      {
+        tier: 0,
+        name: "lookup",
+        model: null,
+        note: "answered from the code tables, no model call",
+      },
+      { tier: 1, name: "fast", model: config.ai.modelTier1 },
+      { tier: 2, name: "standard", model: config.ai.modelTier2 },
+      { tier: 3, name: "deep", model: config.ai.modelTier3 },
+    ],
+    primaryProvider: config.ai.primaryProvider,
+    fallbackProvider: config.ai.fallbackProvider || null,
+    webSearch: config.ai.webSearch,
+    maxTokens: config.ai.maxTokens,
+    maxRetries: config.ai.maxRetries,
+    promptVersion: prompts.PROMPT_VERSION,
+  };
+}
 
 /**
  * Every setting the console may write, with what a valid value looks like.
@@ -446,4 +483,5 @@ module.exports = {
   listDefaultLinks, addDefaultLink, removeDefaultLink,
   auditLog, auditActions,
   dismissUnanswered, restoreUnanswered, listDismissedUnanswered,   // dAI
+  modelRouting,                                                    // dAI
 };

@@ -12,6 +12,16 @@ class ConversationError extends Error {
   }
 }
 
+// dAI: ACCEPTED AND STORED, ENFORCED BY NOTHING.
+//
+// No code deletes a message because of this value, and none should until a
+// question outside engineering is answered: what Dolluz is obliged to keep,
+// and for how long. These are claim conversations in a healthcare back office,
+// and deleting them is permanent.
+//
+// Left in place rather than removed so the column, the API and the dAdmin side
+// do not have to change twice. If you are here because you assumed it worked,
+// it does not. docs/PHASES.md carries the decision.
 const RETENTIONS = ["forever", "1y", "90d", "30d"];
 const NOTIF_LEVELS = ["all", "mentions", "none"];
 const MEMBER_ROLES = ["owner", "member", "guest"];
