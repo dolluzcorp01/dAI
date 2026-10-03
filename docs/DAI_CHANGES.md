@@ -201,3 +201,19 @@ Node 18, nothing would have started dAI on 22.
 | `ecosystem.config.js` | `// dAI:` `interpreter`, overridable with `DAI_NODE` | Without it pm2 launches dAI on whatever `node` means in its shell, which is now 18, where `--env-file-if-exists` does not exist. |
 | `deploy/deploy.sh` | pins `PATH` and refuses anything below Node 22 | Migrations on Node 18 would run with no environment at all and fail in a way that reads like a database fault. |
 | `docs/16-pilot-runbook.md` | `nvm alias default system` immediately after `nvm install`, with the reason and a verification in a fresh shell | The window between installing nvm and fixing the default is the dangerous part. |
+
+## A retention sweep, and seven settings that do nothing (2026-10-03)
+
+| File | Change | Why |
+|---|---|---|
+| `server/scripts/retention.js` | new | The first thing in dAI that deletes anything on a schedule. Dry run unless `--apply`, so a crontab typo cannot delete. Read notifications and old digest runs only. Deletes in chunks of 1000, because one statement removing a hundred thousand rows holds a lock long enough to be noticed on one CPU, and the first run after months of accumulation is when that happens. Refuses `--audit-log` with a reason rather than ignoring it. |
+| `server/tests/retention.test.js` | new | Creates its own user and scopes every call to it, so a failure here can never be somebody else's data disappearing. |
+
+Measured while building it: **97.6% of notifications are unread** (179,081 of
+183,559). The policy as specified, read-only by age, therefore trims the tail
+and does not control growth. Said rather than shipped quietly: the decision
+about unread notifications belongs to Shoban.
+
+Also found, and not acted on pending a decision: seven of the eleven settings
+the admin API exposes are read by no code at all, `auth.require_mfa` among them,
+and there is no MFA anywhere in the product.

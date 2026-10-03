@@ -373,6 +373,35 @@ truncated, or missing `users`, `messages`, `conversations` or
 `schema_migrations`, and it only prunes while a readable dump remains. It cannot
 tell you that the disk is nearly full, so check `df -h` when you check the log.
 
+### The retention sweep
+
+Nothing in dAI deleted anything until this script. Run it by hand first and read
+what it says it would do:
+
+```bash
+cd /var/www/dolluzcorp.com/dai/server
+node scripts/retention.js --notifications 90 --digests 90
+```
+
+It is a dry run unless `--apply` is passed, which is also what makes it safe to
+put in a crontab with a typo in it. Then, weekly:
+
+```cron
+30 3 * * 0 cd /var/www/dolluzcorp.com/dai/server && /root/.nvm/versions/node/v22.23.3/bin/node scripts/retention.js --notifications 90 --digests 90 --apply >> /var/log/dai/retention.log 2>&1
+```
+
+The full node path matters for the same reason it does in `deploy.sh`: cron gets
+a minimal environment and `node` there is the system Node 18.
+
+**What it will and will not reclaim.** It deletes read notifications and old
+digest runs. It never touches unread notifications, at any age, because an
+unread notification is somebody's outstanding work. In the development database
+**97.6% of notifications are unread** (179,081 of 183,559), because a thumbs
+down notifies every reviewer and most never open it. So this policy controls the
+digest log and trims the read tail, and it does **not** stop the notifications
+table growing. That is a policy question rather than a bug, and it is recorded in
+PHASES under known gaps.
+
 **The dump contains message bodies, so it contains claim detail.** It is written
 0600 into a 0700 directory. Copying it anywhere else is a decision about PHI,
 not a convenience.
@@ -431,11 +460,11 @@ Everything in this list is a thing nobody has watched happen:
   window the next refresh closes.
 - The quick switcher reads only the 200 most recently active conversations
   before filtering, so a heavy user cannot find an older one by name.
-- **Nothing prunes anything.** There is no retention job for notifications,
-  `digest_runs` or `audit_log`, and no code acts on the `retention` setting that
-  conversations and spaces carry. In development, notifications reached 134,869
-  rows and 40 MB at 314 bytes a row. A pilot of a few people will not trouble a
-  3.8 GB disk, but nothing stops it and nobody is watching it, and the first
-  place it hurts is the nightly dump, which is on the same disk.
+- **Growth is only half controlled.** `scripts/retention.js` now removes read
+  notifications and old digest runs, and it has never run on the server. It does
+  not remove unread notifications, which in development are 97.6% of the table,
+  so the notifications table still grows without bound. `audit_log` is never
+  pruned, deliberately. The first place any of this hurts is the nightly dump,
+  which is on the same disk.
 
 The first three are where the trouble will come from.

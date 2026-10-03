@@ -231,10 +231,20 @@ by a real person. PENDING = not started. Update this table at the end of every s
 1.5 dAdmin dAI pages (separate repo, see PROMPT_dAdmin.md)
 
 ## Known gaps carried forward (do not lose these)
-- No retention anywhere. Nothing prunes notifications, digest_runs or audit_log, and the
-  retention setting on conversations and spaces is stored and read but never acted on. A
-  setting that does nothing is worse than no setting, because someone will set it and
-  believe it. Logged 2026-10-01 during Phase 4 provisioning.
+- Retention is half solved. scripts/retention.js (2026-10-03) deletes read notifications
+  and old digest runs, never unread ones, and never audit_log. But 97.6% of notifications
+  in development are unread (179,081 of 183,559), because a thumbs down notifies every
+  reviewer and most never open it, so the table still grows without bound. Deciding what
+  to do about an unread notification that is a year old is a policy question for Shoban,
+  not a code one. Options: a much longer window for unread, a cap per person, or accept
+  the growth and watch the disk.
+- SEVEN of the eleven settings the admin API exposes are read by no code at all:
+  org.name, files.max_mb, auth.access_token_minutes, auth.refresh_token_days,
+  auth.code_ttl_seconds, auth.require_mfa, spaces.default_retention. The four that work
+  are points.per_cent, points.show_cash, notifications.include_message_text and
+  reports.allow_content_export. conversations.retention is the same: stored, validated,
+  never acted on. auth.require_mfa is the worst of them, because there is no MFA anywhere
+  in the product and the setting says there is. Found 2026-10-03, awaiting a decision.
 - The quick switcher reads the 200 most recently active conversations and filters those in
   JavaScript (search.service.js). Someone in more than 200 conversations cannot find an
   older one by typing its name, and it fails silently: the list simply does not contain it.
