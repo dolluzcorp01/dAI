@@ -280,20 +280,44 @@ describe("settings", () => {
   });
 
   test("accepts a valid change", async () => {
-    const r = await api("PATCH", "/api/admin/settings", { "files.max_mb": 40 }, admin.token);
+    // points.per_cent rather than files.max_mb: the latter was removed on
+    // 2026-10-03 because nothing read it, and MAX_FILE_MB in the environment is
+    // what actually applies.
+    const r = await api("PATCH", "/api/admin/settings", { "points.per_cent": 1200 }, admin.token);
     assert.equal(r.status, 200);
-    assert.ok(r.body.changed.some(c => c.key === "files.max_mb" && c.value === "40"));
+    assert.ok(r.body.changed.some(c => c.key === "points.per_cent" && c.value === "1200"));
 
-    const row = await db.one(`SELECT setting_value AS v FROM org_settings WHERE setting_key = 'files.max_mb'`);
-    assert.equal(row.v, "40");
-    await api("PATCH", "/api/admin/settings", { "files.max_mb": 25 }, admin.token);
+    const row = await db.one(`SELECT setting_value AS v FROM org_settings WHERE setting_key = 'points.per_cent'`);
+    assert.equal(row.v, "1200");
+    await api("PATCH", "/api/admin/settings", { "points.per_cent": 1000 }, admin.token);
   });
 
   test("rejects a value outside its range rather than storing it", async () => {
-    const r = await api("PATCH", "/api/admin/settings", { "files.max_mb": 99999 }, admin.token);
+    const r = await api("PATCH", "/api/admin/settings", { "points.per_cent": 99999999 }, admin.token);
     assert.equal(r.status, 400);
-    const row = await db.one(`SELECT setting_value AS v FROM org_settings WHERE setting_key = 'files.max_mb'`);
-    assert.equal(row.v, "25", "unchanged");
+    const row = await db.one(`SELECT setting_value AS v FROM org_settings WHERE setting_key = 'points.per_cent'`);
+    assert.equal(row.v, "1000", "unchanged");
+  });
+
+  test("every setting listed is one that some code actually reads", async () => {
+    // The rule the seven removals leave behind. A setting that nothing reads is
+    // a control panel wired to nothing, and someone will set it and believe it.
+    const r = await api("GET", "/api/admin/settings", null, admin.token);
+    const keys = r.body.settings.map(s => s.key).sort();
+    assert.deepEqual(keys, [
+      "notifications.include_message_text",
+      "points.per_cent",
+      "points.show_cash",
+      "reports.allow_content_export",
+    ], "adding a key here means adding the code that reads it, in the same commit");
+
+    for (const gone of [
+      "org.name", "files.max_mb", "auth.access_token_minutes", "auth.refresh_token_days",
+      "auth.code_ttl_seconds", "auth.require_mfa", "spaces.default_retention",
+    ]) {
+      const write = await api("PATCH", "/api/admin/settings", { [gone]: "1" }, admin.token);
+      assert.equal(write.status, 400, `${gone} is still writable`);
+    }
   });
 
   test("rejects a key that is not on the whitelist", async () => {
@@ -305,7 +329,7 @@ describe("settings", () => {
 
   test("applies the good keys and reports the bad ones", async () => {
     const r = await api("PATCH", "/api/admin/settings", {
-      "org.name": "Dolluz Corporation", "nonsense.key": "x",
+      "points.show_cash": false, "nonsense.key": "x",
     }, admin.token);
     assert.equal(r.status, 200);
     assert.equal(r.body.changed.length, 1);
@@ -314,10 +338,10 @@ describe("settings", () => {
 
   test("a setting change is audited", async () => {
     const before = await db.one(`SELECT COUNT(*) AS n FROM audit_log WHERE action='org.settings_changed'`);
-    await api("PATCH", "/api/admin/settings", { "spaces.default_retention": "90d" }, admin.token);
+    await api("PATCH", "/api/admin/settings", { "points.show_cash": true }, admin.token);
     const after = await db.one(`SELECT COUNT(*) AS n FROM audit_log WHERE action='org.settings_changed'`);
     assert.ok(Number(after.n) > Number(before.n));
-    await api("PATCH", "/api/admin/settings", { "spaces.default_retention": "1y" }, admin.token);
+    await api("PATCH", "/api/admin/settings", { "points.show_cash": false }, admin.token);
   });
 });
 

@@ -244,13 +244,30 @@ by a real person. PENDING = not started. Update this table at the end of every s
   side, since that is where credentials live and dAI never holds a password, plus a claim
   in the dAI session saying the factor was satisfied. That is a dAdmin feature with a dAI
   follow-on, not a dAI feature, and it is a Phase 5 conversation at the earliest.
-- SIX more of the eleven settings the admin API exposes are read by no code at all:
-  org.name, files.max_mb, auth.access_token_minutes, auth.refresh_token_days,
-  auth.code_ttl_seconds, auth.require_mfa, spaces.default_retention. The four that work
-  are points.per_cent, points.show_cash, notifications.include_message_text and
-  reports.allow_content_export. conversations.retention is the same: stored, validated,
-  never acted on. auth.require_mfa is the worst of them, because there is no MFA anywhere
-  in the product and the setting says there is. Found 2026-10-03, awaiting a decision.
+- SIX more settings REMOVED 2026-10-03, all read by no code: org.name, files.max_mb,
+  auth.access_token_minutes, auth.refresh_token_days, auth.code_ttl_seconds,
+  spaces.default_retention. Four remain and all four are enforced: points.per_cent,
+  points.show_cash, notifications.include_message_text, reports.allow_content_export.
+  What each removed one would cost to build properly:
+    org.name                   trivial. One read where the console title and the mail
+                               templates are rendered. Not worth a setting until something
+                               renders an organisation name that is not hardcoded.
+    files.max_mb               small, but it belongs to Phase 2 with the rest of files, and
+                               MAX_FILE_MB in the environment already does the job. Two
+                               places to set one thing is the bug, not the missing read.
+    auth.access_token_minutes  small each, same objection: ACCESS_TOKEN_MINUTES,
+    auth.refresh_token_days    REFRESH_TOKEN_DAYS and AUTH_CODE_TTL_SECONDS already apply,
+    auth.code_ttl_seconds      and a database value that silently loses to the environment
+                               is worse than no value. If these should be editable at run
+                               time, config.js has to read them per request rather than at
+                               boot, which is a real change to how config works.
+    spaces.default_retention   see the legal note below. Spaces are Phase 2 anyway.
+- conversations.retention is still accepted and still enforces nothing. It is a LEGAL
+  question before it is an engineering one: enforcing it means permanently deleting message
+  history in a healthcare back-office, and what Dolluz is obliged to keep, and for how long,
+  has not been established. Until somebody answers that, building the deletion would be
+  building a thing nobody can say is correct. Left in place and documented rather than
+  removed, because removing it would also need the dAdmin side to stop sending it.
 - The quick switcher reads the 200 most recently active conversations and filters those in
   JavaScript (search.service.js). Someone in more than 200 conversations cannot find an
   older one by typing its name, and it fails silently: the list simply does not contain it.

@@ -47,16 +47,20 @@ const text = (max) => (v) => {
  *
  * If MFA is built, this comes back with the code that enforces it, in the same
  * commit, and not before.
+ *
+ * Six more went the same day, for the same reason: org.name, files.max_mb,
+ * auth.access_token_minutes, auth.refresh_token_days, auth.code_ttl_seconds and
+ * spaces.default_retention. Nothing read any of them. The four auth and files
+ * ones were worse than merely dead, because the same values ARE configurable
+ * through the environment and the environment is what applies: two control
+ * panels for one thing, one of them wired to nothing.
+ *
+ * The rule this leaves behind: a key belongs here only when some code reads it.
+ * Grep before adding one.
  */
 const SETTINGS = {
-  "org.name":                           { cast: text(160),                     note: "Shown in the console and in emails" },
   "points.per_cent":                    { cast: intIn(1, 1000000),             note: "Points required for one cent" },
   "points.show_cash":                   { cast: bool,                          note: "Show the cash value to associates" },
-  "files.max_mb":                       { cast: intIn(1, 500),                 note: "Largest upload accepted" },
-  "auth.access_token_minutes":          { cast: intIn(1, 1440),                note: "Access token lifetime" },
-  "auth.refresh_token_days":            { cast: intIn(1, 365),                 note: "How long someone stays signed in" },
-  "auth.code_ttl_seconds":              { cast: intIn(10, 600),                note: "Extension handoff code lifetime" },
-  "spaces.default_retention":           { cast: oneOf(["forever","1y","90d","30d"]), note: "Retention for new spaces" },
   "notifications.include_message_text": { cast: bool,                          note: "Let message text leave in emails and push" },
   "reports.allow_content_export":       { cast: bool,                          note: "Allow exports containing message text" },
 };
