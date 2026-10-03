@@ -65,35 +65,65 @@ describe("what it would delete", () => {
     await makeNotification({ age: 200, read: false });   // stays: unread
     await makeNotification({ age: 5, read: true });      // stays: recent
 
-    const out = await retention.plan({ notifications: 90, digests: 90, userIds: [userId] });
-    assert.equal(out.notifications.wouldDelete, 2,
+    const out = await retention.plan({ notifications: 90, unread: 365, digests: 90, userIds: [userId] });
+    assert.equal(out.notificationsRead.wouldDelete, 2,
       "only the old read ones, not the unread one and not the recent one");
+    assert.equal(out.notificationsUnread.wouldDelete, 0,
+      "200 days has not reached the 365 day unread window");
   });
 
   test("a dry run changes nothing", async () => {
     const beforeCount = await countMine("notifications");
-    await retention.plan({ notifications: 90, digests: 90, userIds: [userId] });
+    await retention.plan({ notifications: 90, unread: 365, digests: 90, userIds: [userId] });
     assert.equal(await countMine("notifications"), beforeCount,
       "plan() is the dry run, and a dry run that deletes is worse than no dry run");
   });
 });
 
 describe("what it deletes", () => {
-  test("old read notifications go, unread stay at any age", async () => {
+  test("read ones go at the short window, unread survive it", async () => {
     await db.query("DELETE FROM notifications WHERE user_id = ?", [userId]);
-    const old1 = await makeNotification({ age: 400, read: true });
-    const unreadAncient = await makeNotification({ age: 400, read: false });
+    const oldRead = await makeNotification({ age: 200, read: true });
+    const oldUnread = await makeNotification({ age: 200, read: false });
     const recentRead = await makeNotification({ age: 10, read: true });
 
-    const done = await retention.sweep({ notifications: 90, digests: 90, userIds: [userId] });
-    assert.equal(done.notifications, 1);
+    const done = await retention.sweep({ notifications: 90, unread: 365, digests: 90, userIds: [userId] });
+    assert.equal(done.notificationsRead, 1);
+    assert.equal(done.notificationsUnread, 0);
 
     const [rows] = await db.query("SELECT id FROM notifications WHERE user_id = ?", [userId]);
     const left = rows.map(r => Number(r.id));
-    assert.ok(!left.includes(Number(old1)), "the old read one should be gone");
-    assert.ok(left.includes(Number(unreadAncient)),
-      "an unread notification is somebody's outstanding work, at any age");
+    assert.ok(!left.includes(Number(oldRead)), "200 days past the 90 day read window");
+    assert.ok(left.includes(Number(oldUnread)),
+      "unread at 200 days is still somebody's outstanding work");
     assert.ok(left.includes(Number(recentRead)), "ten days old is not old");
+  });
+
+  test("unread go at the long window, because a year old is noise not work", async () => {
+    await db.query("DELETE FROM notifications WHERE user_id = ?", [userId]);
+    const ancientUnread = await makeNotification({ age: 400, read: false });
+    const oldUnread = await makeNotification({ age: 200, read: false });
+
+    const done = await retention.sweep({ notifications: 90, unread: 365, digests: 90, userIds: [userId] });
+    assert.equal(done.notificationsUnread, 1, "only the one past 365 days");
+
+    const [rows] = await db.query("SELECT id FROM notifications WHERE user_id = ?", [userId]);
+    const left = rows.map(r => Number(r.id));
+    assert.ok(!left.includes(Number(ancientUnread)));
+    assert.ok(left.includes(Number(oldUnread)),
+      "the two windows have to be far apart, or the long one is doing the short one's job");
+  });
+
+  test("the two windows are independent", async () => {
+    await db.query("DELETE FROM notifications WHERE user_id = ?", [userId]);
+    await makeNotification({ age: 400, read: true });
+    await makeNotification({ age: 400, read: false });
+
+    // A sweep with no unread window configured still clears the read one.
+    const done = await retention.sweep({ notifications: 90, unread: 3650, digests: 90, userIds: [userId] });
+    assert.equal(done.notificationsRead, 1);
+    assert.equal(done.notificationsUnread, 0, "a ten year unread window should spare it");
+    assert.equal(await countMine("notifications"), 1);
   });
 
   test("digest runs go by age alone", async () => {
@@ -102,8 +132,8 @@ describe("what it deletes", () => {
     await makeDigestRun({ age: 100 });
     const recent = await makeDigestRun({ age: 3 });
 
-    const done = await retention.sweep({ notifications: 90, digests: 90, userIds: [userId] });
-    assert.equal(done.digest_runs, 2);
+    const done = await retention.sweep({ notifications: 90, unread: 365, digests: 90, userIds: [userId] });
+    assert.equal(done.digestRuns, 2);
 
     const [rows] = await db.query("SELECT id FROM digest_runs WHERE user_id = ?", [userId]);
     assert.deepEqual(rows.map(r => Number(r.id)), [Number(recent)]);
@@ -124,8 +154,8 @@ describe("what it deletes", () => {
       `INSERT INTO notifications (user_id, kind, title, body, created_at, read_at)
        VALUES ${values.join(",")}`, params);
 
-    const done = await retention.sweep({ notifications: 90, digests: 90, userIds: [userId] });
-    assert.equal(done.notifications, many,
+    const done = await retention.sweep({ notifications: 90, unread: 365, digests: 90, userIds: [userId] });
+    assert.equal(done.notificationsRead, many,
       "the loop must keep going past the first chunk, or most rows survive for ever");
     assert.equal(await countMine("notifications"), 0);
   });
@@ -142,7 +172,7 @@ describe("what it deletes", () => {
       [otherId, daysAgo(400), daysAgo(400)]
     );
 
-    await retention.sweep({ notifications: 90, digests: 90, userIds: [userId] });
+    await retention.sweep({ notifications: 90, unread: 365, digests: 90, userIds: [userId] });
 
     const [[row]] = await db.query("SELECT COUNT(*) AS n FROM notifications WHERE user_id = ?", [otherId]);
     assert.equal(Number(row.n), 1, "another user's rows must not be touched by a scoped sweep");
@@ -168,6 +198,19 @@ describe("what it refuses", () => {
     assert.equal(flags.notifications, 2);
     assert.equal(flags.force, false, "and without --force the script stops before deleting");
     assert.ok(retention.MIN_DAYS >= 7, "a week is the least that should pass unremarked");
+  });
+
+  test("unread is held to a higher bar than read", () => {
+    // Deleting something nobody has seen is a different act from deleting
+    // something they have, so the floor is higher and the script says so.
+    assert.ok(retention.MIN_UNREAD_DAYS >= 180,
+      "half a year is the least that should pass before an unseen notification is binned");
+    assert.ok(retention.MIN_UNREAD_DAYS > retention.MIN_DAYS);
+
+    const flags = retention.parseArgs([]);
+    assert.equal(flags.unread, 365, "a year by default");
+    assert.ok(flags.unread > flags.notifications,
+      "the unread window must be the longer of the two, or it does the read one's job");
   });
 
   test("dry run is the default, so a cron typo cannot delete anything", () => {

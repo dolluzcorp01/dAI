@@ -64,6 +64,8 @@ const unread = async (token) =>
   (await api("GET", "/api/notifications?unreadOnly=true&limit=100", null, token)).body.notifications || [];
 
 /** Ask, then vote it down. Returns the sme_queue id. */
+const myQueueItems = [];   // what this suite raised, so it can take it back out
+
 const raiseSmeItem = async (question, token) => {
   const asked = await api("POST", "/api/kody/ask", { question }, token);
   assert.equal(asked.status, 200);
@@ -71,6 +73,7 @@ const raiseSmeItem = async (question, token) => {
     { vote: "down" }, token);
   assert.equal(voted.status, 200);
   assert.ok(voted.body.smeQueueId);
+  myQueueItems.push(Number(voted.body.smeQueueId));
   return { smeQueueId: voted.body.smeQueueId, messageId: asked.body.message.id };
 };
 
@@ -93,6 +96,18 @@ before(async () => {
 });
 
 after(async () => {
+  // Every run used to leave its open items behind. The queue page is capped at
+  // 200 rows ordered newest first, so a suite that backdates its rows to
+  // February falls off the page once enough newer items exist, and the tests
+  // start failing on the second run rather than the first. A suite that cannot
+  // be run twice is not a test (module rule 16).
+  if (myQueueItems.length > 0) {
+    const ids = [...new Set(myQueueItems)];
+    const marks = ids.map(() => "?").join(",");
+    await db.query(`DELETE FROM notifications WHERE ref_type = 'sme_queue' AND ref_id IN (${marks})`, ids);
+    await db.query(`DELETE FROM sme_queue WHERE id IN (${marks})`, ids);
+  }
+
   server.close();
   await db.pool.end();
 });
@@ -223,6 +238,7 @@ describe("who counts as working the queue", () => {
 describe("the queue can be ordered and dated", () => {
   // Three items raised in order, then backdated so the window is testable.
   let older, middle, newer;
+  const WINDOW = "&from=2026-02-09&to=2026-02-15";
 
   before(async () => {
     older = await raiseSmeItem(`Queue order one ${stamp}`, reporter.token);
@@ -239,7 +255,11 @@ describe("the queue can be ordered and dated", () => {
   const ids = (items) => items.map(i => i.id);
 
   test("newest first by default, which is what an expert opens the queue for", async () => {
-    const out = await api("GET", "/api/kody/sme?status=open&limit=200", null, reviewer.token);
+    // Scoped to the days this test backdated its rows to. Without a window the
+    // queue returns the newest 200 of everything, and these three, dated
+    // February, drop off that page as soon as enough newer items exist.
+    const out = await api("GET",
+      `/api/kody/sme?status=open&limit=200${WINDOW}`, null, reviewer.token);
     assert.equal(out.status, 200);
     const mine = ids(out.body.items).filter(id =>
       [older.smeQueueId, middle.smeQueueId, newer.smeQueueId].includes(id));
@@ -247,7 +267,8 @@ describe("the queue can be ordered and dated", () => {
   });
 
   test("oldest first is still available for working through a backlog", async () => {
-    const out = await api("GET", "/api/kody/sme?status=open&order=oldest&limit=200", null, reviewer.token);
+    const out = await api("GET",
+      `/api/kody/sme?status=open&order=oldest&limit=200${WINDOW}`, null, reviewer.token);
     const mine = ids(out.body.items).filter(id =>
       [older.smeQueueId, middle.smeQueueId, newer.smeQueueId].includes(id));
     assert.deepEqual(mine, [older.smeQueueId, middle.smeQueueId, newer.smeQueueId]);
@@ -349,8 +370,10 @@ describe("the queue can be ordered and dated", () => {
   test("the order is stable when two items share a second", async () => {
     await db.query("UPDATE sme_queue SET created_at = ? WHERE id IN (?,?)",
       ["2026-02-14 09:00:00", middle.smeQueueId, newer.smeQueueId]);
-    const first = await api("GET", "/api/kody/sme?status=open&limit=200", null, reviewer.token);
-    const second = await api("GET", "/api/kody/sme?status=open&limit=200", null, reviewer.token);
+    const first = await api("GET",
+      `/api/kody/sme?status=open&limit=200${WINDOW}`, null, reviewer.token);
+    const second = await api("GET",
+      `/api/kody/sme?status=open&limit=200${WINDOW}`, null, reviewer.token);
     assert.deepEqual(ids(first.body.items), ids(second.body.items),
       "created_at alone would let two items in the same second swap between reads");
   });

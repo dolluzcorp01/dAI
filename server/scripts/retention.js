@@ -5,7 +5,7 @@
  *
  *   node scripts/retention.js                      dry run, says what it would delete
  *   node scripts/retention.js --apply              actually delete
- *   node scripts/retention.js --notifications 60 --digests 180 --apply
+ *   node scripts/retention.js --notifications 60 --unread 540 --digests 180 --apply
  *   node scripts/retention.js --user 42            one person only
  *
  * Dry run unless --apply is passed. Nothing here can be undone, and the whole
@@ -14,10 +14,20 @@
  *
  * What it removes:
  *
- *   notifications   READ ones older than --notifications days. Unread are never
- *                   touched at any age: an unread notification is somebody's
- *                   outstanding work, and it is not the sweeper's business to
- *                   decide they have missed their chance.
+ *   notifications   READ ones older than --notifications days (90 by default),
+ *                   and UNREAD ones older than --unread days (365 by default).
+ *
+ *                   The two windows are far apart on purpose. An unread
+ *                   notification is somebody's outstanding work, right up until
+ *                   it obviously is not: a year-old unread notification is noise
+ *                   and nobody is going to act on it. Keeping unread rows for
+ *                   ever was measured and does not work, because 97.6% of
+ *                   notifications are never read. A thumbs down notifies every
+ *                   reviewer and most never open it, so a read-only policy
+ *                   reclaims about one row in forty and the table grows anyway.
+ *
+ *                   The real fix is to send fewer, which is a Phase 2 question
+ *                   about fan-out and not something a sweeper can answer.
  *   digest_runs     older than --digests days. A log of digest sends, useful for
  *                   a few months and never after that.
  *
@@ -39,27 +49,48 @@
 const db = require("../src/db");
 
 const MIN_DAYS = 7;
+const MIN_UNREAD_DAYS = 180;
 const CHUNK = 1000;
 
-const TABLES = {
-  notifications: {
-    /** Read ones only, by when they arrived rather than when they were read. */
+/**
+ * Each rule is one DELETE. Age is measured from when a row arrived, not from
+ * when it was read: "after ninety days" is what a person means by it.
+ */
+const RULES = [
+  {
+    key: "notificationsRead",
+    table: "notifications",
+    window: "notifications",
     where: "created_at < ? AND read_at IS NOT NULL",
     label: "read notifications",
   },
-  digest_runs: {
+  {
+    key: "notificationsUnread",
+    table: "notifications",
+    window: "unread",
+    where: "created_at < ? AND read_at IS NULL",
+    label: "unread notifications",
+  },
+  {
+    key: "digestRuns",
+    table: "digest_runs",
+    window: "digests",
     where: "created_at < ?",
     label: "digest runs",
   },
-};
+];
 
 function parseArgs(argv) {
-  const flags = { notifications: 90, digests: 90, apply: false, userIds: [], force: false };
+  const flags = {
+    notifications: 90, unread: 365, digests: 90,
+    apply: false, userIds: [], force: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--apply") flags.apply = true;
     else if (a === "--force") flags.force = true;
     else if (a === "--notifications") flags.notifications = Number(argv[++i]);
+    else if (a === "--unread") flags.unread = Number(argv[++i]);
     else if (a === "--digests") flags.digests = Number(argv[++i]);
     else if (a === "--user") flags.userIds.push(Number(argv[++i]));
     else if (a === "--audit-log") {
@@ -78,30 +109,40 @@ function parseArgs(argv) {
 const cutoff = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
 /** Build the WHERE and its parameters, including the optional user scope. */
-function clauseFor(table, days, userIds) {
-  const spec = TABLES[table];
-  const where = [spec.where];
+function clauseFor(rule, days, userIds) {
+  const where = [rule.where];
   const params = [cutoff(days)];
   if (userIds && userIds.length > 0) {
     where.push(`user_id IN (${userIds.map(() => "?").join(",")})`);
     params.push(...userIds);
   }
-  return { sql: where.join(" AND "), params, label: spec.label };
+  return { sql: where.join(" AND "), params };
 }
+
+const windowsFrom = (opts) => ({
+  notifications: opts.notifications === undefined ? 90 : opts.notifications,
+  unread: opts.unread === undefined ? 365 : opts.unread,
+  digests: opts.digests === undefined ? 90 : opts.digests,
+});
 
 /**
  * What a sweep would do, without doing it. Counts rather than estimates: on a
  * table this size the count is cheap, and an estimate that was wrong would make
  * the dry run worthless.
  */
-async function plan({ notifications = 90, digests = 90, userIds = [] } = {}) {
+async function plan(opts = {}) {
+  const windows = windowsFrom(opts);
+  const userIds = opts.userIds || [];
   const out = {};
-  for (const [table, days] of [["notifications", notifications], ["digest_runs", digests]]) {
-    const { sql, params, label } = clauseFor(table, days, userIds);
-    const [[row]] = await db.query(`SELECT COUNT(*) AS n FROM ${table} WHERE ${sql}`, params);
-    const [[total]] = await db.query(`SELECT COUNT(*) AS n FROM ${table}`);
-    out[table] = {
-      label,
+
+  for (const rule of RULES) {
+    const days = windows[rule.window];
+    const { sql, params } = clauseFor(rule, days, userIds);
+    const [[row]] = await db.query(`SELECT COUNT(*) AS n FROM ${rule.table} WHERE ${sql}`, params);
+    const [[total]] = await db.query(`SELECT COUNT(*) AS n FROM ${rule.table}`);
+    out[rule.key] = {
+      label: rule.label,
+      table: rule.table,
       days,
       olderThan: cutoff(days).toISOString().slice(0, 19).replace("T", " "),
       wouldDelete: Number(row.n),
@@ -109,19 +150,21 @@ async function plan({ notifications = 90, digests = 90, userIds = [] } = {}) {
     };
   }
 
-  // Unread, reported so the operator can see what is being left behind and why
-  // the number does not match the table size.
-  const [[unread]] = await db.query("SELECT COUNT(*) AS n FROM notifications WHERE read_at IS NULL");
-  out.notifications.unreadKept = Number(unread.n);
+  // What stays, so the operator can see what is being left behind rather than
+  // inferring it from the difference between two numbers.
+  const [[keptUnread]] = await db.query(
+    `SELECT COUNT(*) AS n FROM notifications
+      WHERE read_at IS NULL AND created_at >= ?`, [cutoff(windows.unread)]);
+  out.notificationsUnread.keptNewer = Number(keptUnread.n);
   return out;
 }
 
 /** Delete in chunks, so no single statement holds a long lock. */
-async function sweepTable(table, days, userIds) {
-  const { sql, params } = clauseFor(table, days, userIds);
+async function sweepRule(rule, days, userIds) {
+  const { sql, params } = clauseFor(rule, days, userIds);
   let removed = 0;
   for (;;) {
-    const [res] = await db.query(`DELETE FROM ${table} WHERE ${sql} LIMIT ${CHUNK}`, params);
+    const [res] = await db.query(`DELETE FROM ${rule.table} WHERE ${sql} LIMIT ${CHUNK}`, params);
     const n = res.affectedRows || 0;
     removed += n;
     if (n < CHUNK) break;
@@ -129,11 +172,14 @@ async function sweepTable(table, days, userIds) {
   return removed;
 }
 
-async function sweep({ notifications = 90, digests = 90, userIds = [] } = {}) {
-  return {
-    notifications: await sweepTable("notifications", notifications, userIds),
-    digest_runs: await sweepTable("digest_runs", digests, userIds),
-  };
+async function sweep(opts = {}) {
+  const windows = windowsFrom(opts);
+  const userIds = opts.userIds || [];
+  const out = {};
+  for (const rule of RULES) {
+    out[rule.key] = await sweepRule(rule, windows[rule.window], userIds);
+  }
+  return out;
 }
 
 /* ---------------- the command line ---------------- */
@@ -141,7 +187,8 @@ async function sweep({ notifications = 90, digests = 90, userIds = [] } = {}) {
 async function main() {
   const flags = parseArgs(process.argv.slice(2));
 
-  for (const [name, days] of [["--notifications", flags.notifications], ["--digests", flags.digests]]) {
+  for (const [name, days] of [["--notifications", flags.notifications],
+                             ["--unread", flags.unread], ["--digests", flags.digests]]) {
     if (!Number.isFinite(days) || days <= 0) {
       console.error(`${name} must be a number of days.`);
       process.exit(1);
@@ -153,18 +200,32 @@ async function main() {
     }
   }
 
+  // Unread is held to a higher bar than read, because deleting something nobody
+  // has seen is a different act from deleting something they have.
+  if (flags.unread < MIN_UNREAD_DAYS && !flags.force) {
+    console.error(`--unread ${flags.unread} is under ${MIN_UNREAD_DAYS} days.`);
+    console.error("An unread notification is somebody's outstanding work until it is");
+    console.error("obviously not. If you mean it, add --force.");
+    process.exit(1);
+  }
+  if (flags.unread < flags.notifications && !flags.force) {
+    console.error(`--unread ${flags.unread} is shorter than --notifications ${flags.notifications},`);
+    console.error("which would delete unread notifications sooner than read ones.");
+    process.exit(1);
+  }
+
   const scope = flags.userIds.length > 0 ? ` for user ${flags.userIds.join(", ")}` : "";
   console.log(flags.apply ? `Retention sweep${scope}` : `Retention sweep, DRY RUN${scope}`);
   console.log("");
 
   const before = await plan(flags);
-  for (const key of Object.keys(TABLES)) {
-    const p = before[key];
+  for (const rule of RULES) {
+    const p = before[rule.key];
     console.log(`${p.label}`);
     console.log(`  older than ${p.days} days, so before ${p.olderThan}`);
     console.log(`  ${p.wouldDelete} of ${p.total} rows`);
   }
-  console.log(`unread notifications kept, whatever their age: ${before.notifications.unreadKept}`);
+  console.log(`unread notifications newer than ${flags.unread} days, kept: ${before.notificationsUnread.keptNewer}`);
   console.log("");
   console.log("audit_log is not touched by this script, at any age.");
   console.log("");
@@ -179,11 +240,12 @@ async function main() {
   const done = await sweep(flags);
   const after = await plan(flags);
 
-  console.log(`deleted ${done.notifications} read notifications`);
-  console.log(`deleted ${done.digest_runs} digest runs`);
+  console.log(`deleted ${done.notificationsRead} read notifications`);
+  console.log(`deleted ${done.notificationsUnread} unread notifications older than ${flags.unread} days`);
+  console.log(`deleted ${done.digestRuns} digest runs`);
   console.log(`in ${Math.round((Date.now() - started) / 100) / 10}s`);
 
-  const left = after.notifications.wouldDelete + after.digest_runs.wouldDelete;
+  const left = RULES.reduce((n, rule) => n + after[rule.key].wouldDelete, 0);
   if (left > 0) console.log(`WARNING: ${left} rows still match. Something is writing faster than this deletes.`);
 
   await db.pool.end();
@@ -196,4 +258,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { plan, sweep, parseArgs, MIN_DAYS, CHUNK };
+module.exports = { plan, sweep, parseArgs, RULES, MIN_DAYS, MIN_UNREAD_DAYS, CHUNK };

@@ -380,27 +380,35 @@ what it says it would do:
 
 ```bash
 cd /var/www/dolluzcorp.com/dai/server
-node scripts/retention.js --notifications 90 --digests 90
+node scripts/retention.js --notifications 90 --unread 365 --digests 90
 ```
 
 It is a dry run unless `--apply` is passed, which is also what makes it safe to
 put in a crontab with a typo in it. Then, weekly:
 
 ```cron
-30 3 * * 0 cd /var/www/dolluzcorp.com/dai/server && /root/.nvm/versions/node/v22.23.3/bin/node scripts/retention.js --notifications 90 --digests 90 --apply >> /var/log/dai/retention.log 2>&1
+30 3 * * 0 cd /var/www/dolluzcorp.com/dai/server && /root/.nvm/versions/node/v22.23.3/bin/node scripts/retention.js --notifications 90 --unread 365 --digests 90 --apply >> /var/log/dai/retention.log 2>&1
 ```
 
 The full node path matters for the same reason it does in `deploy.sh`: cron gets
 a minimal environment and `node` there is the system Node 18.
 
-**What it will and will not reclaim.** It deletes read notifications and old
-digest runs. It never touches unread notifications, at any age, because an
-unread notification is somebody's outstanding work. In the development database
-**97.6% of notifications are unread** (179,081 of 183,559), because a thumbs
-down notifies every reviewer and most never open it. So this policy controls the
-digest log and trims the read tail, and it does **not** stop the notifications
-table growing. That is a policy question rather than a bug, and it is recorded in
-PHASES under known gaps.
+**Two windows, far apart.** Read notifications go at 90 days, unread at 365.
+An unread notification is somebody's outstanding work right up until it
+obviously is not, and a year-old one is noise nobody will act on.
+
+Keeping unread for ever was tried and measured, and does not work: **97.6% of
+notifications in development are unread** (179,081 of 183,559), because a thumbs
+down notifies every reviewer and most never open it. A read-only policy
+reclaims about one row in forty.
+
+The script holds unread to a higher bar than read. Below 180 days it refuses
+without `--force`, and it refuses outright if the unread window is shorter than
+the read one, because that would bin unseen notifications sooner than seen ones.
+
+None of this is the real fix. 97.6% unread means **too many notifications are
+being sent**, which is a Phase 2 question about fan-out, not something a sweeper
+can answer.
 
 **The dump contains message bodies, so it contains claim detail.** It is written
 0600 into a 0700 directory. Copying it anywhere else is a decision about PHI,

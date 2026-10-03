@@ -217,3 +217,12 @@ about unread notifications belongs to Shoban.
 Also found, and not acted on pending a decision: seven of the eleven settings
 the admin API exposes are read by no code at all, `auth.require_mfa` among them,
 and there is no MFA anywhere in the product.
+
+## The unread window, and seven settings gone (2026-10-03)
+
+| File | Change | Why |
+|---|---|---|
+| `server/scripts/retention.js` | `--unread`, default 365 days | Keeping unread for ever was measured and does not work: 97.6% of notifications are never read, so a read-only policy reclaims one row in forty. Unread is held to a higher bar than read: below 180 days it refuses without `--force`, and it refuses outright if the unread window is shorter than the read one, because that would bin unseen notifications sooner than seen ones. |
+| `server/src/services/admin.service.js` | `auth.require_mfa` removed, then six more | A setting belongs in that list only when some code reads it. Four remain and all four are enforced. A test asserts the exact list, so adding a key means adding its reader in the same commit. |
+| `server/tests/admin.test.js` | three tests moved off removed keys | They used `files.max_mb`, `org.name` and `spaces.default_retention` to exercise unrelated behaviour. |
+| `server/tests/sme-loop.test.js` | the ordering tests scope to their own date window, and the suite deletes its queue items | Every run left its open items behind, the queue page is the newest 200, and rows backdated to February fell off that page once enough newer ones existed. It failed on the second run, not the first. The fourth suite to fail this way. |

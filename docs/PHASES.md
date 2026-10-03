@@ -231,13 +231,16 @@ by a real person. PENDING = not started. Update this table at the end of every s
 1.5 dAdmin dAI pages (separate repo, see PROMPT_dAdmin.md)
 
 ## Known gaps carried forward (do not lose these)
-- Retention is half solved. scripts/retention.js (2026-10-03) deletes read notifications
-  and old digest runs, never unread ones, and never audit_log. But 97.6% of notifications
-  in development are unread (179,081 of 183,559), because a thumbs down notifies every
-  reviewer and most never open it, so the table still grows without bound. Deciding what
-  to do about an unread notification that is a year old is a policy question for Shoban,
-  not a code one. Options: a much longer window for unread, a cap per person, or accept
-  the growth and watch the disk.
+- Retention: scripts/retention.js (2026-10-03) deletes read notifications after 90 days,
+  unread after 365, and digest runs after 90. Never audit_log. Dry run unless --apply.
+  It has never run on the server.
+- THE FAN-OUT ITSELF NEEDS RETHINKING IN PHASE 2. 97.6% of notifications in development
+  are unread: 179,081 of 183,559. That is not a storage problem that a sweeper fixes, it
+  is the product telling people things they do not want to know. One thumbs down notifies
+  every SME reviewer, and the done-check produced 280 rows from a single click. Phase 2
+  should decide who actually needs to be told, whether a digest replaces the per-event
+  notification for most people, and whether a reviewer can opt out of a domain. A sweeper
+  that deletes a year later is a bucket under a leak.
 - auth.require_mfa REMOVED 2026-10-03, on its own and first, because ticking it told a
   security officer they had multi-factor authentication when the product has none: no
   implementation, no schema, nothing. To build it properly: a second factor on the dAdmin
