@@ -20,7 +20,7 @@ with Ask Kody (codes, knowledge, AI), team chat, files, search and notifications
 1. Use the module code as it is. Do not rewrite features, logic or file layout. When a change is
    unavoidable, make the smallest edit, mark it with a `// dAI:` comment, and add a line to
    docs/DAI_CHANGES.md saying what and why.
-2. Never edit an applied migration. Add the next numbered file (next is 011).
+2. Never edit an applied migration. Add the next numbered file (see rule 9 for the number).
 3. The module rules in README.kody-modules.md "Rules" 1-24 all apply (seq ordering, no model-generated
    codes, scan gate, PHI stays out of notifications, private Spaces objects, and the rest).
 4. Identity is not duplicated. Real users sign in with dadmin.employee credentials (Phase 1).
@@ -28,6 +28,14 @@ with Ask Kody (codes, knowledge, AI), team chat, files, search and notifications
 5. No em dash or en dash anywhere: code, comments, docs, UI text, emails. Use "-".
 6. No secrets in the repo. .env is gitignored; .env.example lists keys with empty values.
 7. A check that cannot run is inconclusive, never a pass.
+8. A mutation that deletes never runs against a database anyone else uses. Mutation testing
+   is how a test is proved to be real, but a mutation of code that DELETES is not like one
+   of code that returns: it does the damage whether or not the test catches it, and
+   restoring the file afterwards restores nothing. Before running one, read what it will do.
+   If it is destructive, point it at a scratch database or do not run it.
+   Learned on 2026-10-03, by replacing `WHERE id > ?` with `WHERE id >= 0` in the test
+   cleanup hook and emptying 33 of 47 tables in the development database.
+9. Migrations are numbered from 012 now; rule 2 still applies. Next is 013.
 
 ## "Be Careful" standard (how every task is done)
 - Before: read the relevant doc and the code you will change. State the plan in a few lines.

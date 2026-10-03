@@ -232,7 +232,7 @@ and there is no MFA anywhere in the product.
 | File | Change | Why |
 |---|---|---|
 | `server/tests/helpers/cleanup.mjs` | new | Four suites had failed on a second run for the same reason, and the fifth was always going to arrive. Notes the highest id in every table before a suite starts, deletes anything above those marks when it finishes. Loaded into every test process, so a new suite cannot forget it. |
-| `server/tests/run.js` | new | `npm test` goes through this. It has to be NODE_OPTIONS rather than `--import`: `node --test` runs each file in a child process and `--import` on the parent never reaches them. It also expands the file list itself, because the old script relied on the shell expanding `tests/*.test.js` and cmd.exe does not. |
+| `server/tests/run.js` | new | `npm test` goes through this. It has to be NODE_OPTIONS rather than `--import`: `node --test` runs each file in a child process and `--import` on the parent never reaches them. It also lists the files itself and fails when none match, because `node --test` on a pattern that matches nothing prints `# tests 0` and exits 0. |
 | `server/package.json` | `test` runs the runner; `test:dirty` skips cleanup | For inspecting what a failure left behind. |
 | `server/tests/cleanup-hook.test.js` | new | Guards the three traps that were actually hit while writing it. |
 | `server/tests/knowledge.test.js` | the citation test creates its own message | It cited whatever the newest assistant message in the database happened to be, which only ever worked because other suites had left some behind. On a database rebuilt from the migrations there were none. |
@@ -252,3 +252,22 @@ look broken rather than the hook:
    and expect config to pick it up; auth.test.js sets AUTH_RATE_LOGIN_MAX, lost
    it, and ran into the real login rate limit. The hook now reads the database
    settings from the environment and touches none of the application's modules.
+
+## Correction: npm test was never running zero tests (2026-10-03)
+
+The commit that added the runner said `npm test` had been "running nothing at
+all" on Windows outside a bash shell. That was inferred from cmd.exe not
+expanding globs, and it is wrong. It was checked afterwards, properly:
+
+```
+cmd.exe: node -e "...print argv..." tests/*.test.js   ->  1 arg: tests/*.test.js
+cmd.exe: node --test tests/cleanup*.test.js           ->  # tests 7, # pass 7
+```
+
+cmd.exe does not expand the pattern, but `node --test` expands it itself. The
+old script ran the full suite on cmd.exe exactly as it did under bash, so **no
+result recorded in PHASES is affected and no done-check needs re-running.**
+
+The related hazard is real and is what the runner now guards: a pattern matching
+NOTHING makes `node --test` print `# tests 0` and exit 0, which is a green run
+that proves nothing. `run.js` lists the files and exits 1 when none match.

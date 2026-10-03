@@ -9,9 +9,17 @@
  * a child process and --import on the parent does not reach them. NODE_OPTIONS
  * is inherited, so it does.
  *
- * It also expands the file list itself. The old script relied on the shell
- * expanding tests/*.test.js, which cmd.exe does not do, so on Windows that
- * silently ran nothing.
+ * It also expands the file list itself, and refuses to run when nothing matches.
+ *
+ * NOT because the old script was broken: cmd.exe does not expand a glob, but
+ * node --test expands the pattern itself, so `npm test` ran the whole suite on
+ * cmd.exe exactly as it did under bash. That was checked, after being asserted
+ * here incorrectly.
+ *
+ * The real hazard is the one below it. A pattern that matches NOTHING makes
+ * node --test print "# tests 0" and exit 0: a green run that proves nothing.
+ * Listing the files here means a typo or a moved directory is an error rather
+ * than a pass.
  *
  *   npm test                 every suite, with cleanup
  *   npm test -- chat kody    only suites whose name contains chat or kody
