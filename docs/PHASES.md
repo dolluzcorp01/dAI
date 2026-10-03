@@ -231,6 +231,13 @@ by a real person. PENDING = not started. Update this table at the end of every s
 1.5 dAdmin dAI pages (separate repo, see PROMPT_dAdmin.md)
 
 ## Known gaps carried forward (do not lose these)
+- Test cleanup is automatic as of 2026-10-03. tests/run.js loads tests/helpers/cleanup.mjs
+  into every test process through NODE_OPTIONS, which notes the highest id in every table
+  before a suite runs and deletes anything above those marks when it finishes. Two full runs
+  now leave every row count unchanged. What it does NOT undo is changes to rows that already
+  existed: a suite that rewrites a seed password or flips a setting still has to put it back.
+  It also needs --test-concurrency=1, which tests/run.js sets: with files running in
+  parallel, one file's cleanup would delete another file's rows.
 - Retention: scripts/retention.js (2026-10-03) deletes read notifications after 90 days,
   unread after 365, and digest runs after 90. Never audit_log. Dry run unless --apply.
   It has never run on the server.

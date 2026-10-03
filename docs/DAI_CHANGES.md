@@ -226,3 +226,29 @@ and there is no MFA anywhere in the product.
 | `server/src/services/admin.service.js` | `auth.require_mfa` removed, then six more | A setting belongs in that list only when some code reads it. Four remain and all four are enforced. A test asserts the exact list, so adding a key means adding its reader in the same commit. |
 | `server/tests/admin.test.js` | three tests moved off removed keys | They used `files.max_mb`, `org.name` and `spaces.default_retention` to exercise unrelated behaviour. |
 | `server/tests/sme-loop.test.js` | the ordering tests scope to their own date window, and the suite deletes its queue items | Every run left its open items behind, the queue page is the newest 200, and rows backdated to February fell off that page once enough newer ones existed. It failed on the second run, not the first. The fourth suite to fail this way. |
+
+## Cleanup by default, and the model routing table (2026-10-03)
+
+| File | Change | Why |
+|---|---|---|
+| `server/tests/helpers/cleanup.mjs` | new | Four suites had failed on a second run for the same reason, and the fifth was always going to arrive. Notes the highest id in every table before a suite starts, deletes anything above those marks when it finishes. Loaded into every test process, so a new suite cannot forget it. |
+| `server/tests/run.js` | new | `npm test` goes through this. It has to be NODE_OPTIONS rather than `--import`: `node --test` runs each file in a child process and `--import` on the parent never reaches them. It also expands the file list itself, because the old script relied on the shell expanding `tests/*.test.js` and cmd.exe does not. |
+| `server/package.json` | `test` runs the runner; `test:dirty` skips cleanup | For inspecting what a failure left behind. |
+| `server/tests/cleanup-hook.test.js` | new | Guards the three traps that were actually hit while writing it. |
+| `server/tests/knowledge.test.js` | the citation test creates its own message | It cited whatever the newest assistant message in the database happened to be, which only ever worked because other suites had left some behind. On a database rebuilt from the migrations there were none. |
+| `server/src/services/admin.service.js`, `routes/admin.routes.js` | `// dAI:` `GET /api/admin/model-routing` | Read only, for dAdmin's Kody AI page. No key material and no keysPresent flag: whether a key is configured is a readiness question. Tier 0 reports `model: null`, which is the no-generated-codes rule made visible. |
+| `server/src/services/conversations.service.js` | `// dAI:` a note on RETENTIONS | It is accepted, stored and enforced by nothing, and that is waiting on a legal answer. A reader should not have to find PHASES to learn it. |
+
+Two traps the cleanup hook fell into first, both of which made the application
+look broken rather than the hook:
+
+1. `process.on("beforeExit")` fires whenever the event loop happens to be empty,
+   which during an async test run is not the same as the process finishing. It
+   deleted sessions and refresh tokens while auth.test.js was still using them:
+   ten failures that read like the API was broken. A root `after()` hook from
+   node:test is the right thing.
+2. The hook imported `src/config`, which built and cached it before the test
+   file ran. Several suites set an environment variable at the top of the file
+   and expect config to pick it up; auth.test.js sets AUTH_RATE_LOGIN_MAX, lost
+   it, and ran into the real login rate limit. The hook now reads the database
+   settings from the environment and touches none of the application's modules.

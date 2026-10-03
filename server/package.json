@@ -15,7 +15,9 @@
     "migrate:fresh": "node --env-file-if-exists=../.env scripts/migrate.js --fresh",
     "import:codes": "node --env-file-if-exists=../.env scripts/import-codes.js",
     "digest": "node --env-file-if-exists=../.env scripts/send-digests.js",
-    "test": "node --env-file-if-exists=../.env --test --test-concurrency=1 tests/*.test.js",
+    "test": "node tests/run.js",
+    "test:dirty": "node tests/run.js --dirty",
+    "test:raw": "node --env-file-if-exists=../.env --test --test-concurrency=1 tests/*.test.js",
     "seed:passwords": "node --env-file-if-exists=../.env scripts/seed-passwords.js"
   },
   "dependencies": {

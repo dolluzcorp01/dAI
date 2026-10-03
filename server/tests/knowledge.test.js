@@ -192,12 +192,25 @@ describe("authoring", () => {
   });
 
   test("a citation still resolves to the version that was actually used", async () => {
-    const [ins] = await db.query(
-      `INSERT INTO kody_citations (kody_message_id, doc_id)
-       SELECT id, ? FROM kody_messages WHERE role = 'assistant' ORDER BY id DESC LIMIT 1`,
-      [docId]
+    // This used to cite whatever the newest assistant message in the database
+    // happened to be, which worked only because earlier suites had left some
+    // behind. On a database rebuilt from the migrations there were none, the
+    // insert matched no rows, and the assertion below read as a broken citation
+    // rather than a test borrowing somebody else's data (module rule 16).
+    const me = await db.one("SELECT id FROM users WHERE email = ?", ["shoban@dolluzcorp.com"]);
+    const [thread] = await db.query(
+      "INSERT INTO kody_threads (user_id, title) VALUES (?, ?)",
+      [me.id, `citation thread ${Date.now()}`]
     );
-    assert.ok(ins.affectedRows >= 0);
+    const [message] = await db.query(
+      "INSERT INTO kody_messages (thread_id, role, body) VALUES (?, 'assistant', ?)",
+      [thread.insertId, "the answer that cited this document"]
+    );
+    const [ins] = await db.query(
+      "INSERT INTO kody_citations (kody_message_id, doc_id) VALUES (?, ?)",
+      [message.insertId, docId]
+    );
+    assert.equal(ins.affectedRows, 1, "the suite must create the citation it asserts on");
     const cited = await db.one(
       `SELECT d.id, d.body, d.status FROM kody_citations c
          JOIN knowledge_docs d ON d.id = c.doc_id WHERE c.doc_id = ? LIMIT 1`, [docId]
