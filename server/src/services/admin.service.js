@@ -35,7 +35,19 @@ const text = (max) => (v) => {
   return s.length > 0 && s.length <= max ? s : null;
 };
 
-/** Every setting the console may write, with what a valid value looks like. */
+/**
+ * Every setting the console may write, with what a valid value looks like.
+ *
+ * dAI: a setting belongs here only if some code reads it. auth.require_mfa was
+ * removed on 2026-10-03 because there is no multi-factor authentication in this
+ * product at all: no implementation, no schema, nothing. The setting said
+ * otherwise, and a security officer who ticked it would have believed they had
+ * MFA. A control that does nothing is worse than no control, and a security
+ * control that does nothing is worse again.
+ *
+ * If MFA is built, this comes back with the code that enforces it, in the same
+ * commit, and not before.
+ */
 const SETTINGS = {
   "org.name":                           { cast: text(160),                     note: "Shown in the console and in emails" },
   "points.per_cent":                    { cast: intIn(1, 1000000),             note: "Points required for one cent" },
@@ -44,7 +56,6 @@ const SETTINGS = {
   "auth.access_token_minutes":          { cast: intIn(1, 1440),                note: "Access token lifetime" },
   "auth.refresh_token_days":            { cast: intIn(1, 365),                 note: "How long someone stays signed in" },
   "auth.code_ttl_seconds":              { cast: intIn(10, 600),                note: "Extension handoff code lifetime" },
-  "auth.require_mfa":                   { cast: bool,                          note: "Require multi-factor authentication" },
   "spaces.default_retention":           { cast: oneOf(["forever","1y","90d","30d"]), note: "Retention for new spaces" },
   "notifications.include_message_text": { cast: bool,                          note: "Let message text leave in emails and push" },
   "reports.allow_content_export":       { cast: bool,                          note: "Allow exports containing message text" },

@@ -262,6 +262,23 @@ describe("settings", () => {
     assert.ok(r.body.settings.every(s => s.note), "each one explains itself");
   });
 
+  test("does not offer MFA, because there is no MFA", async () => {
+    // Removed 2026-10-03. There is no multi-factor authentication anywhere in
+    // this product, and the setting told a security officer there was. If this
+    // test fails because the key is back, the code that enforces it should be
+    // in the same commit.
+    const r = await api("GET", "/api/admin/settings", null, admin.token);
+    assert.ok(!r.body.settings.some(s => s.key === "auth.require_mfa"),
+      "a security control that does nothing is worse than no control");
+
+    const write = await api("PATCH", "/api/admin/settings", { "auth.require_mfa": true }, admin.token);
+    assert.equal(write.status, 400, "and it cannot be set either");
+
+    const row = await db.one(
+      `SELECT COUNT(*) AS n FROM org_settings WHERE setting_key = 'auth.require_mfa' AND setting_value = 'true'`);
+    assert.equal(Number(row.n), 0, "nothing should be able to turn on a feature that does not exist");
+  });
+
   test("accepts a valid change", async () => {
     const r = await api("PATCH", "/api/admin/settings", { "files.max_mb": 40 }, admin.token);
     assert.equal(r.status, 200);

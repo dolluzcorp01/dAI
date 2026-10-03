@@ -238,7 +238,13 @@ by a real person. PENDING = not started. Update this table at the end of every s
   to do about an unread notification that is a year old is a policy question for Shoban,
   not a code one. Options: a much longer window for unread, a cap per person, or accept
   the growth and watch the disk.
-- SEVEN of the eleven settings the admin API exposes are read by no code at all:
+- auth.require_mfa REMOVED 2026-10-03, on its own and first, because ticking it told a
+  security officer they had multi-factor authentication when the product has none: no
+  implementation, no schema, nothing. To build it properly: a second factor on the dAdmin
+  side, since that is where credentials live and dAI never holds a password, plus a claim
+  in the dAI session saying the factor was satisfied. That is a dAdmin feature with a dAI
+  follow-on, not a dAI feature, and it is a Phase 5 conversation at the earliest.
+- SIX more of the eleven settings the admin API exposes are read by no code at all:
   org.name, files.max_mb, auth.access_token_minutes, auth.refresh_token_days,
   auth.code_ttl_seconds, auth.require_mfa, spaces.default_retention. The four that work
   are points.per_cent, points.show_cash, notifications.include_message_text and
