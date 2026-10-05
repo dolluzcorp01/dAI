@@ -479,6 +479,43 @@ describe("the deploy pins Node 22, because the box is not on it", () => {
   });
 });
 
+describe("deploying without installing on the box", () => {
+  const sh = fs.readFileSync(
+    path.join(__dirname, "..", "..", "deploy", "deploy.sh"), "utf8");
+
+  test("there is a way to skip the install, because it peaks at 228 MB", () => {
+    // The box is 1 vCPU and 1 GB shared with twelve other dApps. npm ci peaks
+    // around 228 MB against 84 MB for the running app, so node_modules is built
+    // elsewhere and copied. Nothing in the tree is compiled, which is what makes
+    // that safe.
+    assert.match(sh, /--skip-install/);
+    assert.match(sh, /DAI_SKIP_INSTALL/, "and an environment variable for a deploy script");
+  });
+
+  test("skipping the install still checks the tree against the lockfile", () => {
+    // Skipping the install must not mean skipping the question of whether the
+    // tree is the right one. A copied node_modules that is stale or truncated
+    // would otherwise be found at runtime, by an import failing.
+    const at = sh.indexOf("SKIP_INSTALL");
+    const block = sh.slice(sh.indexOf("if [ -n \"$SKIP_INSTALL\" ]"));
+    assert.ok(at > 0);
+    // Anchored to the start of a line, so a commented-out npm ls does not
+    // satisfy it. The first version of this test matched anywhere, and passed
+    // against a mutation that turned the check into a comment.
+    assert.match(block.slice(0, 700), /^\s*npm ls --omit=dev/m,
+      "a skipped install should still verify the tree satisfies package-lock.json");
+    assert.match(block.slice(0, 700), /no node_modules to use/,
+      "and say so plainly when there is nothing there at all");
+  });
+
+  test("an unknown option stops it before anything happens", () => {
+    const parse = sh.indexOf("unknown option");
+    const backup = sh.indexOf("backup.sh");
+    assert.ok(parse > 0, "a typo in a deploy flag should not be ignored");
+    assert.ok(parse < backup, "and should be caught before it starts doing things");
+  });
+});
+
 describe("the nginx site files", () => {
   const REPO = path.join(__dirname, "..", "..");
   const site = fs.readFileSync(path.join(REPO, "deploy/nginx/dai.dolluzcorp.com.conf"), "utf8");

@@ -2,8 +2,9 @@
 #
 # Deploy dAI on the Dolluz server.
 #
-#   ./deploy.sh              deploy whatever is checked out
-#   ./deploy.sh --no-backup  skip the backup (only when you have just taken one)
+#   ./deploy.sh                 deploy whatever is checked out
+#   ./deploy.sh --no-backup     skip the backup (only when you have just taken one)
+#   ./deploy.sh --skip-install  do not run npm ci: node_modules was built elsewhere
 #
 # Production here is pm2 behind nginx, not Docker. One process, fork mode,
 # port 4011. See ecosystem.config.js for why one.
@@ -39,6 +40,17 @@ DEPLOY_DIR="$PWD"
 say() { echo "==> $*"; }
 die() { echo "deploy failed: $*" >&2; exit 1; }
 
+SKIP_INSTALL=""
+NO_BACKUP=""
+for arg in "$@"; do
+  case "$arg" in
+    --skip-install) SKIP_INSTALL="yes" ;;
+    --no-backup)    NO_BACKUP="yes" ;;
+    *) die "unknown option $arg" ;;
+  esac
+done
+[ "${DAI_SKIP_INSTALL:-}" = "1" ] && SKIP_INSTALL="yes"
+
 NODE_VERSION="$(node -v 2>/dev/null || echo none)"
 case "$NODE_VERSION" in
   v2[2-9].*|v[3-9][0-9].*) : ;;
@@ -55,16 +67,26 @@ PREVIOUS="$(git -C "$APP_DIR" rev-parse HEAD 2>/dev/null || echo "")"
 
 # ---------------------------------------------------------------- backup
 
-if [ "${1:-}" != "--no-backup" ]; then
+if [ -z "$NO_BACKUP" ]; then
   say "Backing up the database first"
   "$DEPLOY_DIR/backup.sh" || die "backup failed, so nothing was changed"
 fi
 
 # ---------------------------------------------------------------- install
 
-say "Installing dependencies"
 cd "$APP_DIR/server"
-npm ci --omit=dev 2>/dev/null || npm install --omit=dev
+if [ -n "$SKIP_INSTALL" ]; then
+  # node_modules was built on another machine and copied here, because npm ci
+  # peaks around 228 MB and this box has 1 GB shared with twelve other apps.
+  # Nothing in the tree is compiled, so a tree built anywhere works here.
+  [ -d node_modules ] || die "--skip-install, but there is no node_modules to use."
+  say "Skipping install. Checking the tree matches the lockfile instead"
+  npm ls --omit=dev --depth=0 >/dev/null 2>&1     || die "node_modules does not satisfy package-lock.json. Rebuild it and copy it again."
+  say "The tree satisfies the lockfile"
+else
+  say "Installing dependencies"
+  npm ci --omit=dev 2>/dev/null || npm install --omit=dev
+fi
 
 # ---------------------------------------------------------------- migrate
 

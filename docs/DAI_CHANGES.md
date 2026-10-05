@@ -302,3 +302,5 @@ variable that is already set. The first version of the suite wrote a temporary
 developer's own configuration instead, because the test runner was itself
 started with the repository's `.env`. The suite passes the values as the child's
 environment instead.
+
+| `deploy/deploy.sh` | `--skip-install`, and `DAI_SKIP_INSTALL=1` | `npm ci` peaks at 228 MB against 84 MB for the running app, on a box with 1 GB shared between thirteen apps, so `node_modules` is built elsewhere and copied. Skipping the install does not skip checking it: `npm ls --omit=dev` must still say the tree satisfies the lockfile. An unknown flag is now refused before anything happens, rather than ignored. |

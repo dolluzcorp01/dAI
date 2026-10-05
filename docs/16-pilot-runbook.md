@@ -320,8 +320,28 @@ key or an unexpected model bill should not be mixed into that.
 
 ```bash
 cd /var/www/dolluzcorp.com/dai
-./deploy/deploy.sh
+./deploy/deploy.sh --skip-install
 ```
+
+`--skip-install` because `node_modules` was built on another machine and copied
+here: `npm ci` peaks around 228 MB on a box with 1 GB shared between thirteen
+apps. Skipping the install does not skip the question of whether the tree is
+right, though. It runs `npm ls --omit=dev` and refuses to go on if the tree does
+not satisfy `package-lock.json`.
+
+Build the tree on a machine that can afford it:
+
+```bash
+# on a laptop, in a scratch copy of server/ rather than the repo, since
+# --omit=dev strips the dev dependencies the test suite needs
+npm ci --omit=dev --no-audit --no-fund
+tar -czf node_modules.tgz node_modules
+```
+
+Copy it over with a checksum manifest and verify every file before anything
+starts. Nothing in the tree is compiled, which is what makes a tree built on
+Windows safe on Linux: 246 packages, 5,676 files, 68 MB, zero native binaries,
+zero packages pinned to an OS or CPU.
 
 It backs up, installs, migrates once, starts pm2, waits for readiness, and rolls
 the code back if readiness never comes up.
