@@ -248,9 +248,46 @@ MODEL_PRIMARY_PROVIDER=mock
 MODEL_FALLBACK_PROVIDER=
 ```
 
-Production refuses to start on a configuration that looks fine and fails
-quietly, so if anything above is wrong the process will say so and stop rather
-than run half-configured. That is the intended behaviour, not a fault.
+Those are every line that must change. Do not rely on having read the list
+carefully, because the dangerous mistakes here are the ones that start
+perfectly well:
+
+```bash
+chmod 600 .env
+cd server
+node --env-file=../.env scripts/check-env.js --port 4011
+```
+
+**The `--env-file` is the point.** `node -e` on its own does not read `.env`, so
+a check written without it fails on the first secret and proves nothing about
+anything after it. That mistake was made on this runbook on 2026-10-05.
+
+`check-env.js` covers what `config.js` cannot. `config.js` refuses to START on a
+configuration that is dangerous: a development JWT secret, no Redis, local disk,
+a scanner that is not real, a mock model, a memory transport. The checker covers
+the other kind, the configuration that starts perfectly and is simply wrong:
+
+| Left wrong | What happens |
+|---|---|
+| `PORT` still 4014 while nginx proxies 4011 | Boots, serves nobody, 502 for ever |
+| `PUBLIC_URL` still localhost | Sign in builds URLs nobody can reach |
+| `MODEL_FALLBACK_PROVIDER=openai` with no key | Fine until the primary fails, which is the day it was meant to help |
+| Both JWT secrets the same string | An access token verifies as a refresh token |
+| `EXTENSION_IDS` empty or malformed | Nobody can sign in through the extension |
+
+It exits non-zero when anything is wrong, so it can go in a deploy script later.
+`MODEL_PRIMARY_PROVIDER=mock` is reported as a note rather than an error,
+because the first deploy runs on it deliberately.
+
+Then confirm the production guards themselves, which is a separate thing:
+
+```bash
+NODE_ENV=production node --env-file=../.env -e "require('./src/config'); console.log('every production guard passes')"
+```
+
+On the first deploy this correctly stops at one line, `Refusing to start in
+production with the mock model provider`. Everything before it having passed is
+the result worth having.
 
 ---
 

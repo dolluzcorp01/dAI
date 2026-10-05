@@ -282,3 +282,23 @@ Found by Shoban running step 1d on the real box, not by anything here.
 | `deploy/nginx/dai.dolluzcorp.com.conf` | `.well-known/acme-challenge` served ahead of the redirect | A second fault in the same area, and the worse of the two because it is silent. Certbot renews with the authenticator it first used, so every renewal fetches the challenge over port 80. With the redirect first, Let's Encrypt follows it to https, hits `location / { return 404; }` and the renewal fails. Nobody finds out for sixty days, and then the site stops. |
 | `deploy/nginx/dai.dolluzcorp.com.conf` | the `ssl_certificate` lines are live, not commented | Commenting them out does not make the file installable: nginx refuses the listener either way. All it changes is that the error says "no ssl_certificate is defined" rather than naming the file that is missing, and the second is more useful. |
 | `server/tests/deploy.test.js` | four tests over both files | The challenge must come before the redirect, stage one must not listen on 443 or redirect to https, both certificate lines must be live, and http2 must be on the listen directive for the 1.24 that Ubuntu 24.04 ships. |
+
+## A check instead of a list (2026-10-05)
+
+Shoban pointed out that the runbook's config check was written as
+`node -e "..."` with no `--env-file`, so it did not read `.env` at all: it fell
+over on the first secret and proved nothing. Rule 7 says a check that cannot run
+is inconclusive, and that one was written into a runbook anyway.
+
+| File | Change | Why |
+|---|---|---|
+| `server/scripts/check-env.js` | new | `config.js` refuses to START on a dangerous configuration. This covers the other kind: the one that starts perfectly well and is wrong. `PORT` left at 4014 while nginx proxies 4011 boots happily and returns 502 for ever. A fallback provider with no key behind it works until the primary fails, which is the day it was supposed to help. Two JWT secrets the same string means an access token verifies as a refresh token. It reads `.env.example` to find what the template ships, so a value still at its template default is reported without a list here that somebody has to remember to update. |
+| `server/tests/check-env.test.js` | new | Fourteen cases, each a mistake that is easy to make and expensive to diagnose. |
+| `docs/16-pilot-runbook.md` | the check, with `--env-file`, and why it matters | Replaces "read this list carefully", which is a weak control for the exact failures that are hardest to spot. |
+
+A note for anyone writing a test around `--env-file`: it does NOT override a
+variable that is already set. The first version of the suite wrote a temporary
+`.env` and ran the checker against it, and every case silently tested the
+developer's own configuration instead, because the test runner was itself
+started with the repository's `.env`. The suite passes the values as the child's
+environment instead.
