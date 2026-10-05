@@ -271,3 +271,14 @@ result recorded in PHASES is affected and no done-check needs re-running.**
 The related hazard is real and is what the runner now guards: a pattern matching
 NOTHING makes `node --test` print `# tests 0` and exit 0, which is a green run
 that proves nothing. `run.js` lists the files and exits 1 when none match.
+
+## The certificate chicken and egg (2026-10-05)
+
+Found by Shoban running step 1d on the real box, not by anything here.
+
+| File | Change | Why |
+|---|---|---|
+| `deploy/nginx/dai.dolluzcorp.com.http-only.conf` | new | The full site file cannot be installed before a certificate exists: nginx refuses an `ssl` listener with none, so `nginx -t` fails, the file cannot be enabled, and `certbot --nginx` cannot run against a config that will not load. This is stage one: port 80, the acme challenge, and a 404 for everything else. Not a redirect to https, because at that stage there is nothing listening there. |
+| `deploy/nginx/dai.dolluzcorp.com.conf` | `.well-known/acme-challenge` served ahead of the redirect | A second fault in the same area, and the worse of the two because it is silent. Certbot renews with the authenticator it first used, so every renewal fetches the challenge over port 80. With the redirect first, Let's Encrypt follows it to https, hits `location / { return 404; }` and the renewal fails. Nobody finds out for sixty days, and then the site stops. |
+| `deploy/nginx/dai.dolluzcorp.com.conf` | the `ssl_certificate` lines are live, not commented | Commenting them out does not make the file installable: nginx refuses the listener either way. All it changes is that the error says "no ssl_certificate is defined" rather than naming the file that is missing, and the second is more useful. |
+| `server/tests/deploy.test.js` | four tests over both files | The challenge must come before the redirect, stage one must not listen on 443 or redirect to https, both certificate lines must be live, and http2 must be on the listen directive for the 1.24 that Ubuntu 24.04 ships. |

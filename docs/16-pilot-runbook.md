@@ -173,15 +173,36 @@ live on the same MySQL server.
 
 ### DNS and the site
 
-Point `dai.dolluzcorp.com` at the droplet, confirm it resolves, then:
+Point `dai.dolluzcorp.com` at the droplet and confirm it resolves.
+
+**Two stages, and the order matters.** nginx refuses to load an `ssl` listener
+with no certificate, so the full site file cannot be installed before the
+certificate exists, and `certbot --nginx` cannot run against a config that will
+not load. Get the certificate with `certonly` over http first.
+
+Stage one, http only:
 
 ```bash
-sudo cp deploy/nginx/dai.dolluzcorp.com.conf /etc/nginx/sites-available/
+sudo cp deploy/nginx/dai.dolluzcorp.com.http-only.conf \
+        /etc/nginx/sites-available/dai.dolluzcorp.com.conf
 sudo ln -s /etc/nginx/sites-available/dai.dolluzcorp.com.conf /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
-sudo certbot --nginx -d dai.dolluzcorp.com
+sudo nginx -t && sudo systemctl reload nginx
+
+sudo certbot certonly --webroot -w /var/www/html -d dai.dolluzcorp.com
 ```
+
+Stage two, the real site, once the certificate is on disk:
+
+```bash
+sudo cp deploy/nginx/dai.dolluzcorp.com.conf /etc/nginx/sites-available/dai.dolluzcorp.com.conf
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+`certonly` leaves the config alone, so the `listen ... http2` lines stay as
+written. The full file keeps serving `/.well-known/acme-challenge/` over port 80
+ahead of its redirect, which is what every renewal needs: certbot renews with
+the authenticator it first used, and if the redirect catches the challenge the
+renewal fails silently and the certificate expires sixty days later.
 
 ### The code and its environment
 

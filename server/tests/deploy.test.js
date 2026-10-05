@@ -479,6 +479,56 @@ describe("the deploy pins Node 22, because the box is not on it", () => {
   });
 });
 
+describe("the nginx site files", () => {
+  const REPO = path.join(__dirname, "..", "..");
+  const site = fs.readFileSync(path.join(REPO, "deploy/nginx/dai.dolluzcorp.com.conf"), "utf8");
+  const stage1 = fs.readFileSync(
+    path.join(REPO, "deploy/nginx/dai.dolluzcorp.com.http-only.conf"), "utf8");
+
+  // Both files explain at length what they must not do, so the explanations
+  // have to come out before grepping for the things they must not do.
+  const directives = (conf) => conf
+    .split(/\r?\n/)
+    .filter(line => !/^\s*#/.test(line))
+    .join(" | ");
+
+  test("the challenge is served over http, ahead of the redirect", () => {
+    // Certbot renews with the authenticator it first used. With webroot, every
+    // renewal fetches /.well-known/acme-challenge/ over port 80. If the
+    // redirect catches it first, Let's Encrypt follows to https, gets the 404,
+    // and the renewal fails. Silently, and sixty days later.
+    const challenge = site.indexOf(".well-known/acme-challenge");
+    const redirect = site.indexOf("return 301 https:");
+    assert.ok(challenge > 0, "the full site file does not serve the acme challenge");
+    assert.ok(redirect > 0);
+    assert.ok(challenge < redirect,
+      "the redirect comes first, so renewals will fail when the certificate is 60 days old");
+  });
+
+  test("there is a stage that works before any certificate exists", () => {
+    // nginx refuses to load an ssl listener with no certificate, so the full
+    // file cannot be installed first and certbot --nginx cannot run against a
+    // config that will not load.
+    assert.ok(!/listen\s+443/.test(directives(stage1)),
+      "the first stage must not listen on 443, or it needs a certificate to exist");
+    assert.match(stage1, /\.well-known\/acme-challenge/);
+    assert.ok(!/return 301 https:/.test(directives(stage1)),
+      "redirecting to https before a certificate exists sends people to a dead port");
+  });
+
+  test("the full file names its certificate rather than commenting it out", () => {
+    const active = site.split("\n").filter(l => /ssl_certificate/.test(l) && !/^\s*#/.test(l));
+    assert.equal(active.length, 2, "ssl_certificate and ssl_certificate_key should both be live");
+  });
+
+  test("http2 is on the listen directive, for nginx 1.24", () => {
+    // http2 on; arrived in 1.25.1 and is an unknown directive on the 1.24 that
+    // Ubuntu 24.04 ships, which is what the box runs.
+    assert.ok(!/http2\s+on;/.test(directives(site)), "http2 on; fails nginx -t on 1.24");
+    assert.match(site, /listen\s+443\s+ssl\s+http2;/);
+  });
+});
+
 describe("file sharing turned off", () => {
   const { createStorage, NoStorage } = require("../src/lib/storage");
 
