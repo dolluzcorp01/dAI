@@ -173,7 +173,7 @@ live on the same MySQL server.
 
 ### DNS and the site
 
-Point `dai.dolluzcorp.com` at the droplet, then:
+Point `dai.dolluzcorp.com` at the droplet, confirm it resolves, then:
 
 ```bash
 sudo cp deploy/nginx/dai.dolluzcorp.com.conf /etc/nginx/sites-available/
