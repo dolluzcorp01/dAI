@@ -42,8 +42,13 @@ verify() {
 
   local size
   size=$(wc -c < "$file" | tr -d ' ')
-  [ "$size" -ge "$MIN_BYTES" ] \
-    || die "dump is ${size} bytes, under the ${MIN_BYTES} minimum. A dump this small is an error message, not a database."
+
+  # An empty database dumps to well under the floor, so the floor only bites
+  # once there is something to measure. The CREATE TABLE check below is what
+  # separates "nothing in it yet" from "the dump went wrong".
+  if [ "$size" -lt "$MIN_BYTES" ] && gzip -dc "$file" 2>/dev/null | grep -q "CREATE TABLE"; then
+    die "dump is ${size} bytes, under the ${MIN_BYTES} minimum, yet it contains tables. Something truncated it."
+  fi
 
   gzip -t "$file" 2>/dev/null \
     || die "gzip cannot read $file. It is truncated or was never finished."
@@ -52,6 +57,16 @@ verify() {
   # which is exactly the case that still gunzips and still looks plausible.
   gzip -dc "$file" | tail -5 | grep -q "Dump completed" \
     || die "the dump has no completion marker. It stopped partway."
+
+  # A database with no tables at all is the first deploy, before migrations
+  # have run. There is genuinely nothing to lose, and failing here would stop
+  # the very deploy that creates the schema. The completion marker above has
+  # already proved the dump ran, so this is "empty", not "broken".
+  if ! gzip -dc "$file" | grep -q "CREATE TABLE"; then
+    say "$(basename "$file") holds no tables: this database has not been migrated yet."
+    say "Nothing to back up. That is correct for a first deploy, not a failure."
+    return 0
+  fi
 
   local missing=()
   for table in "${REQUIRED_TABLES[@]}"; do

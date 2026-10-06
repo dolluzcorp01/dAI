@@ -326,3 +326,18 @@ when the habit slips.
 Nothing secret was ever tracked. `.env`, `deploy/.env.production` and
 `extension/key.pem` were checked and are absent from the index, which is what
 the `.gitignore` entries added for them were for.
+
+## backup.sh would have stopped the first deploy (2026-10-06)
+
+| File | Change | Why |
+|---|---|---|
+| `deploy/backup.sh` | a dump with no tables is "empty", not "broken" | On the first deploy the schema does not exist yet, so the dump contains no `CREATE TABLE` and the verification failed for missing `users`, `messages`, `conversations` and `schema_migrations`. `deploy.sh` runs the backup first, so it would have aborted the very deploy that creates the schema. The completion marker already proves the dump ran, which is what separates "nothing in it yet" from "the dump went wrong". |
+| `deploy/backup.sh` | the size floor only applies when the dump contains tables | Same reason. An empty database dumps to a few hundred bytes legitimately. A dump that is small AND claims to contain tables is still a failure, and says so. |
+| `server/tests/backup-verify.test.js` | new | Eight cases through `--verify-only` against dumps crafted in the test, so it needs no database and no server. That matters, because the case that caused this is a database with no tables, which is awkward to produce on a machine whose only database is the one the tests use. |
+
+Worth knowing for anyone writing more of these: the size floor measures the
+GZIPPED file. The first version of the suite padded its fake dumps with twenty
+thousand identical characters, which gzip reduces to under 300 bytes, so every
+"big enough" dump tripped the size floor and three tests failed for a reason
+that had nothing to do with what they were testing. The padding is random hex
+now.
