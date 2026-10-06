@@ -23,6 +23,11 @@ import { endpoints, setEndpoints, clearEndpoints, matchPattern } from "../shared
 
 const SIDE_PANEL_PATH = "src/sidepanel/index.html";
 
+// The window id of the fallback panel, remembered across the worker being
+// stopped and restarted. MV3 kills the worker after about thirty seconds, so a
+// variable would not survive long enough to be useful.
+const PANEL_WINDOW = "kody_panel_window";
+
 /* ---------------- install ---------------- */
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -136,6 +141,15 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
     const out = await completeSignIn(fake, { apiBase });
     await updateBadge();
     sendResponse(out);
+
+    // dAI: close the tab we were handed the code from. Telling somebody to
+    // close a tab is a step we can do for them. The page shows its tick first,
+    // so the delay is there to be seen rather than to be safe, and if the
+    // worker is stopped before it fires the page still says what happened.
+    if (out && out.ok && sender.tab && sender.tab.id !== undefined) {
+      const tabId = sender.tab.id;
+      setTimeout(() => { chrome.tabs.remove(tabId).catch(() => { /* already closed */ }); }, 1200);
+    }
   })();
   return true;   // async
 });
@@ -174,22 +188,66 @@ async function updateBadge() {
 
 /* ---------------- panel ---------------- */
 
+/**
+ * dAI: is the fallback panel already open? Then focus it rather than opening
+ * another.
+ *
+ * The bubble and the popup both open Kody, and each used to create its own
+ * window. Two panels side by side both say connected, share one session and one
+ * points balance, and immediately disagree with each other about it.
+ */
+async function focusExistingPanel() {
+  let id;
+  try {
+    id = (await chrome.storage.session.get(PANEL_WINDOW))[PANEL_WINDOW];
+  } catch (_) {
+    return false;
+  }
+  if (!id) return false;
+
+  try {
+    await chrome.windows.get(id);                       // throws once it is closed
+    await chrome.windows.update(id, { focused: true, drawAttention: true });
+    return true;
+  } catch (_) {
+    try { await chrome.storage.session.remove(PANEL_WINDOW); } catch (_) { /* gone anyway */ }
+    return false;
+  }
+}
+
 async function openPanel(tabId, payload) {
+  // Before anything else. Otherwise the side panel opens alongside a fallback
+  // window that is already up, which is two panels by a different route.
+  if (await focusExistingPanel()) {
+    if (payload) await chrome.storage.session.set({ kody_pending: payload });
+    return;
+  }
+
   try {
     await chrome.sidePanel.setOptions({ tabId, path: SIDE_PANEL_PATH, enabled: true });
     await chrome.sidePanel.open({ tabId });
   } catch (err) {
     // sidePanel.open must be called from a user gesture; fall back to a window.
-    await chrome.windows.create({
+    const made = await chrome.windows.create({
       url: chrome.runtime.getURL(SIDE_PANEL_PATH),
       type: "popup", width: 420, height: 720,
     });
+    try { await chrome.storage.session.set({ [PANEL_WINDOW]: made.id }); } catch (_) { /* private mode */ }
   }
   if (payload) {
     // The panel may still be booting, so keep it until it asks.
     await chrome.storage.session.set({ kody_pending: payload });
   }
 }
+
+// Forget a panel window the person has closed, so the next open makes a new one
+// rather than trying to focus something that is not there.
+chrome.windows.onRemoved.addListener(async (windowId) => {
+  try {
+    const stored = (await chrome.storage.session.get(PANEL_WINDOW))[PANEL_WINDOW];
+    if (stored === windowId) await chrome.storage.session.remove(PANEL_WINDOW);
+  } catch (_) { /* nothing to forget */ }
+});
 
 function broadcast(message) {
   chrome.runtime.sendMessage(message).catch(() => { /* nothing listening */ });

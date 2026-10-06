@@ -188,6 +188,24 @@ testing itself, and is why every shipped script is now parsed.
 
 ---
 
+## One panel, and the tab closes itself
+
+The bubble and the popup both open Kody. Where `sidePanel.open` is not
+available, each used to create its own window, so two panels could sit side by
+side, both saying connected, sharing one session and one points balance and
+disagreeing about it within a minute. `openPanel` now looks for a panel it has
+already opened and focuses that instead, before it tries anything else. The
+window id lives in `chrome.storage.session`, because MV3 stops the worker after
+about thirty seconds and a variable would be gone by the second click, and a
+`windows.onRemoved` listener forgets it once the person closes it.
+
+When the sign in page hands the code over through `onMessageExternal`, the
+worker closes that tab about a second later, after the page has shown its tick.
+If the worker is stopped before that fires, the page still says what happened
+and the tab can be closed by hand.
+
+---
+
 ## Which server it talks to
 
 Production is the default and the fallback: a packed extension that has never

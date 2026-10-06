@@ -411,6 +411,52 @@ describe("where the extension talks to", () => {
     assert.match(gitignore, /\.secrets\//, "and the place it now lives");
   });
 
+  test("opening Kody twice focuses the panel rather than making a second one", () => {
+    // The bubble and the popup both open Kody, and each used to create its own
+    // window. Two panels side by side both say connected, share one session and
+    // one points balance, and immediately disagree about it.
+    const worker = readExt("src/background/service-worker.js");
+    const open = worker.slice(worker.indexOf("async function openPanel("));
+
+    const focus = open.indexOf("focusExistingPanel()");
+    const sidePanel = open.indexOf("sidePanel.open");
+    const create = open.indexOf("windows.create");
+
+    assert.ok(focus > 0, "openPanel never looks for a panel that is already open");
+    assert.ok(focus < sidePanel,
+      "it opens the side panel before checking, so a fallback window ends up alongside it");
+    assert.ok(focus < create, "it creates a window before checking whether one exists");
+    assert.match(worker, /windows\.update\([^)]*focused: true/,
+      "finding the window is only half of it: focus it");
+  });
+
+  test("a panel window that was closed is forgotten", () => {
+    // Otherwise the next open tries to focus a window that is not there, and
+    // the person gets nothing at all.
+    const worker = readExt("src/background/service-worker.js");
+    assert.match(worker, /windows\.onRemoved\.addListener/);
+    assert.match(worker, /storage\.session\.remove\(PANEL_WINDOW\)/);
+  });
+
+  test("the panel window id survives the worker being stopped", () => {
+    // MV3 stops the worker after about thirty seconds of quiet, so a module
+    // variable would be gone by the second click.
+    const worker = readExt("src/background/service-worker.js");
+    assert.match(worker, /storage\.session\.set\(\{ \[PANEL_WINDOW\]/);
+  });
+
+  test("the sign in tab is closed once the code has been handed over", () => {
+    const worker = readExt("src/background/service-worker.js");
+    const handoff = worker.slice(worker.indexOf("onMessageExternal"));
+    const close = handoff.indexOf("tabs.remove");
+    const respond = handoff.indexOf("sendResponse(out)");
+
+    assert.ok(close > 0, "nothing closes the tab");
+    assert.ok(respond < close, "it closes the tab before answering the page, losing the reply");
+    assert.match(handoff.slice(0, close), /out && out\.ok/,
+      "it should only close the tab when the sign in actually worked");
+  });
+
   test("only the Dolluz site may send the extension a message", () => {
     // Without this key onMessageExternal never fires, so the sign in page
     // could not hand a code back at all. With a wildcard, any page could try.

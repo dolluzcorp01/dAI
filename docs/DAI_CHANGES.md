@@ -439,3 +439,24 @@ A mutation worth recording. The first version of the build test asserted that
 happily when the check has been downgraded from a failure to a warning, as a
 mutation of exactly that shape proved. The test now runs the build with a key
 planted and asserts a non-zero exit.
+
+## Two panels, and a tab nobody should have to close (2026-10-06)
+
+| File | Change | Why |
+|---|---|---|
+| `extension/src/background/service-worker.js` | `openPanel` focuses an existing panel before it opens anything | The bubble and the popup each created their own window, so two panels sat side by side sharing one session and one points balance. The check runs first, ahead of `sidePanel.open`, or a side panel opens alongside a fallback window that is already up. |
+| same | the window id lives in `chrome.storage.session`, and `windows.onRemoved` forgets it | MV3 stops the worker after about thirty seconds, so a variable would be gone by the second click. Forgetting a closed window matters too, or the next open tries to focus something that is not there and the person gets nothing. |
+| same | the sign in tab closes itself about a second after the code is handed over | Telling someone to close a tab is a step we can do for them. The delay lets the tick be seen; if the worker is stopped first, the page still says what happened. |
+
+Not a code change, but worth recording: the spinner fix in bcc45a5 looked
+broken in production and was not. The served file was the old one, checked
+rather than assumed:
+
+```
+production: 8585 bytes, "function signedIn" x0, old inline note x1, last-modified 05 Oct
+this repo:  "function signedIn" x1
+```
+
+`cache-control: no-store` was already set, so it was not a cache. The checkout
+on the box had not been updated. Static files are read per request, so a pull is
+enough; no restart, no deploy.
