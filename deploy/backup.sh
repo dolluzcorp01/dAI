@@ -142,6 +142,14 @@ trap 'rm -f "$TMP"' EXIT
 
 # ---------------------------------------------------------------- dump
 
+# --no-defaults MUST be the first argument, and mysqldump refuses it anywhere
+# else. It stops the client reading option files, which on a shared box is not a
+# theoretical concern: /root/.my.cnf on the Dolluz server carries a password=
+# line belonging to another application, and a password in an option file wins
+# over MYSQL_PWD. The result is that mysqldump authenticates as --user=kody with
+# another app's password and reports access denied, while the same credentials
+# work by hand. Found on the box on 2026-10-06.
+#
 # mysqldump runs in a throwaway container when there is no client on the host,
 # so the droplet does not need one installed and the version always matches.
 #
@@ -170,14 +178,14 @@ CONSISTENCY="--lock-tables"
 say "dumping ${DB_NAME} from ${DB_HOST}:${DB_PORT}"
 
 if command -v mysqldump >/dev/null 2>&1; then
-  MYSQL_PWD="$DB_PASSWORD" mysqldump \
+  MYSQL_PWD="$DB_PASSWORD" mysqldump --no-defaults \
     --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" \
     $CONSISTENCY --quick --routines --triggers --events \
     --no-tablespaces --set-gtid-purged=OFF \
     "$DB_NAME" | gzip -9 > "$TMP"
 else
   docker run --rm -i -e MYSQL_PWD="$DB_PASSWORD" "$MYSQL_IMAGE" \
-    mysqldump \
+    mysqldump --no-defaults \
     --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" \
     $CONSISTENCY --quick --routines --triggers --events \
     --no-tablespaces --set-gtid-purged=OFF \

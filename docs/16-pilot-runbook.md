@@ -468,6 +468,26 @@ truncated, or missing `users`, `messages`, `conversations` or
 `schema_migrations`, and it only prunes while a readable dump remains. It cannot
 tell you that the disk is nearly full, so check `df -h` when you check the log.
 
+### A warning about shared boxes and MySQL option files
+
+Any MySQL client tool reads option files before it reads anything you pass it,
+and a password in one wins over `MYSQL_PWD`. This server has a `/root/.my.cnf`
+belonging to another application. The effect is that `mysqldump --user=kody`
+authenticates with the other application's password and reports access denied,
+while the same credentials work perfectly when you type them by hand, which is
+a confusing afternoon.
+
+`backup.sh` passes `--no-defaults` as the first argument for that reason, and
+mysqldump refuses that flag anywhere but first. If you write any other MySQL
+command for this box, do the same.
+
+```bash
+# the one that lies
+mysqldump --user=kody ... kody            # reads /root/.my.cnf, access denied
+# the one that does what you asked
+mysqldump --no-defaults --user=kody ... kody
+```
+
 ### The retention sweep
 
 Nothing in dAI deleted anything until this script. Run it by hand first and read

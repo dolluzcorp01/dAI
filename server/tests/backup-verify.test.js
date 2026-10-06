@@ -58,6 +58,48 @@ function verify(file) {
 
 const REQUIRED = ["users", "messages", "conversations", "schema_migrations"];
 
+describe("the mysqldump command itself", () => {
+  const sh = fs.readFileSync(SCRIPT, "utf8");
+
+  test("--no-defaults is the FIRST argument, on every invocation", () => {
+    // A shared box can have a /root/.my.cnf belonging to another application,
+    // and a password in an option file wins over MYSQL_PWD. mysqldump then
+    // authenticates as --user=kody with somebody else's password and reports
+    // access denied, while the same credentials work by hand. Reproduced on
+    // Linux against a real 0600 option file: without the flag the dump fails
+    // with error 1045, with it the dump verifies.
+    //
+    // mysqldump refuses --no-defaults anywhere but first, so position is part
+    // of the requirement, not a detail.
+    // Lines where mysqldump is actually being run, not where its presence is
+    // tested: `command -v mysqldump` is a question, not an invocation.
+    const calls = sh
+      .split(/\r?\n/)
+      .filter(line => !/^\s*#/.test(line))
+      .filter(line => /\bmysqldump\s+(--|\\)/.test(line) && !/command -v/.test(line));
+    assert.ok(calls.length >= 2, `found ${calls.length} mysqldump invocations, expected 2`);
+    for (const call of calls) {
+      assert.match(call, /mysqldump --no-defaults/,
+        `an invocation does not start with --no-defaults: ${call.trim()}`);
+    }
+  });
+
+  test("it does not ask for a privilege the kody user has no business holding", () => {
+    // --single-transaction has needed the GLOBAL privilege RELOAD or
+    // FLUSH_TABLES since mysqldump 8.0.32. The database user holds ALL
+    // PRIVILEGES on its own schema and nothing global, which is correct.
+    const code = sh
+      .split(/\r?\n/)
+      .filter(line => !/^\s*#/.test(line))
+      .join(" | ");
+    assert.ok(!/\$CONSISTENCY[^|]*--single-transaction/.test(code));
+    assert.match(code, /CONSISTENCY="--lock-tables"/,
+      "the default has to work with the privileges the user actually has");
+    assert.match(code, /BACKUP_SINGLE_TRANSACTION/,
+      "and there should be a way to opt in where the privilege exists");
+  });
+});
+
 describe("a dump it accepts", () => {
   test("all four required tables, complete, big enough", () => {
     const r = verify(dumpOf([...REQUIRED, "kody_messages", "notifications"]));

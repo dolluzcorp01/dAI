@@ -375,3 +375,22 @@ shell script is not running it, and I had been reading.
 Proven, not asserted: the full path exits 0 with `verified ... all 4 required
 tables present`, and a genuinely empty database, in a throwaway MySQL
 container, reports `nothing to back up` and exits 0.
+
+## /root/.my.cnf was answering for us (2026-10-06)
+
+| File | Change | Why |
+|---|---|---|
+| `deploy/backup.sh` | `--no-defaults` as the FIRST argument of both mysqldump invocations | Shoban diagnosed this on the box. MySQL client tools read option files before anything you pass them, and a `password=` in one wins over `MYSQL_PWD`. `/root/.my.cnf` on that server belongs to another application, so `mysqldump --user=kody` authenticated with somebody else's password and reported access denied, while the same credentials worked by hand. mysqldump refuses `--no-defaults` anywhere but first, so the position is part of the requirement. |
+| `server/tests/backup-verify.test.js` | two tests over the command itself | That every invocation starts with `--no-defaults`, and that the consistency flag is one the database user's privileges actually allow. |
+
+Reproduced on Linux before the fix was pushed, in a container with a real 0600
+`/root/.my.cnf` holding the wrong password:
+
+```
+with    --no-defaults:  verified kody-....sql.gz (841 bytes, all 4 required tables present)
+without --no-defaults:  Access denied for user 'kody'@'172.22.0.3' (using password: YES)
+```
+
+The first attempt at that reproduction proved nothing and said so: the
+bind-mounted option file came out world-writable, MySQL ignored it, and both
+runs behaved identically. A check that cannot run is inconclusive, never a pass.
