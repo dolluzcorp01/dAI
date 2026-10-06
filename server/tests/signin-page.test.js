@@ -53,7 +53,7 @@ after(async () => {
  * Enough DOM for this page and no more. Every id the HTML declares exists, so
  * a typo in the page shows up as a missing element rather than passing.
  */
-function fakeDom({ state, redirectUri, fetchImpl }) {
+function fakeDom({ state, redirectUri, fetchImpl, chromeStub }) {
   // Start each element where the HTML starts it, hidden attribute included:
   // the page relies on #refused and #handoff being hidden until it says so.
   const tags = [...PAGE_HTML.matchAll(/<[a-z0-9]+[^>]*\bid="([a-z0-9-]+)"[^>]*>/g)];
@@ -72,6 +72,12 @@ function fakeDom({ state, redirectUri, fetchImpl }) {
     children: [],
     focused: false,
     attributes: new Map(attributesInHtml(id)),
+    classes: new Set(),
+    classList: {
+      add(name) { elements.get(id).classes.add(name); },
+      remove(name) { elements.get(id).classes.delete(name); },
+      contains(name) { return elements.get(id).classes.has(name); },
+    },
     focus() { this.focused = true; },
     getAttribute(name) { return this.attributes.has(name) ? this.attributes.get(name) : null; },
     setAttribute(name, value) { this.attributes.set(name, String(value)); },
@@ -108,6 +114,9 @@ function fakeDom({ state, redirectUri, fetchImpl }) {
     console,
     // The page uses relative paths, as a page served from this origin does.
     fetch: fetchImpl || ((url, options) => fetch(`${base}${url}`, options)),
+    // Present only when a test asks for it, so the redirect path stays the
+    // default exactly as it is in a browser without the extension installed.
+    ...(chromeStub ? { chrome: chromeStub } : {}),
   };
   context.window = context;
 
@@ -235,6 +244,51 @@ describe("signing in, against the real server", () => {
     await dom.fire("forgot", "click");
     assert.match(dom.el("error").textContent, /Dolluz sign-in password/);
     assert.ok(!/no account|not found|unknown/i.test(dom.el("error").textContent));
+  });
+});
+
+describe("the handoff says when it has finished", () => {
+  /** A chrome that accepts the code, as the extension does. */
+  const acceptingChrome = (accept) => ({
+    runtime: {
+      sendMessage(extensionId, message, callback) {
+        callback(accept ? { ok: true } : { ok: false, error: "untrusted_origin" });
+      },
+    },
+  });
+
+  test("the spinner becomes a tick and the words change with it", async () => {
+    // It used to say "you can close this tab" under a spinner that was still
+    // turning. The one thing on the page that moves said wait while the text
+    // said done, so it read as still working.
+    const dom = fakeDom({
+      state: "k".repeat(24), redirectUri: CALLBACK, chromeStub: acceptingChrome(true),
+    });
+    dom.el("email").value = EMAIL;
+    dom.el("password").value = PASSWORD;
+    await dom.fire("form", "submit");
+
+    assert.equal(dom.el("handoff").hidden, false);
+    assert.ok(dom.el("spinner").classList.contains("done"),
+      "the spinner is still spinning after it has finished");
+    assert.equal(dom.el("handoff-title").textContent, "Signed in");
+    assert.match(dom.el("handoff-note").textContent, /close this tab/);
+    assert.equal(dom.navigations.length, 0, "it handed the code over, so it must not redirect");
+  });
+
+  test("a chrome that refuses the code falls back to the redirect", async () => {
+    // The extension only accepts a message from its own trusted origin. If it
+    // says no, the callback redirect is still the way home.
+    const dom = fakeDom({
+      state: "l".repeat(24), redirectUri: CALLBACK, chromeStub: acceptingChrome(false),
+    });
+    dom.el("email").value = EMAIL;
+    dom.el("password").value = PASSWORD;
+    await dom.fire("form", "submit");
+
+    assert.equal(dom.navigations.length, 1, "it should fall back to the callback");
+    assert.ok(!dom.el("spinner").classList.contains("done"),
+      "nothing finished, so nothing should say it did");
   });
 });
 

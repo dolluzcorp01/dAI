@@ -11,6 +11,7 @@
   --gold-soft: #fbf3dc;
   --gold-deep: #9a7710;
   --red: #b42318;
+  --green: #12b76a;
 }
 
 * { box-sizing: border-box; }
@@ -186,7 +187,29 @@ body {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Finished. A spinner that keeps turning under the words "you can close this
+   tab" reads as still working, which is what it looked like on the box. */
+.spinner.done {
+  animation: none;
+  border-color: var(--green);
+  position: relative;
+}
+
+.spinner.done::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 2px;
+  width: 6px;
+  height: 12px;
+  border: solid var(--green);
+  border-width: 0 2.5px 2.5px 0;
+  transform: rotate(45deg);
+}
+
 .handoff-title { margin: 0; font-size: 13px; font-weight: 600; }
+
+.steps li.done { color: var(--ink); }
 
 .steps {
   width: 320px;

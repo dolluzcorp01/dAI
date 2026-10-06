@@ -359,21 +359,56 @@ describe("where the extension talks to", () => {
       `the manifest derives id ${id}, which is not in EXTENSION_IDS`);
   });
 
-  test("the private key is not in the repository and cannot be packaged", () => {
+  test("no private key lives anywhere under the extension", () => {
+    // Chrome warns about a key file inside a loaded extension ("You probably
+    // don't want to do that"), and a Web Store package built from this folder
+    // would carry it. It belongs in .secrets/ at the repository root, which is
+    // outside everything the build packages. Found on the box on 2026-10-06.
     const fsp = require("node:fs");
-    const gitignore = fsp.readFileSync(path.join(EXT, "..", ".gitignore"), "utf8");
-    assert.match(gitignore, /extension\/key\.pem/, "the signing key is not ignored");
+    const walk = (at) => fsp.readdirSync(at, { withFileTypes: true }).flatMap(e =>
+      e.isDirectory() ? walk(path.join(at, e.name)) : [path.join(at, e.name)]);
 
-    const build = readExt("build.js");
-    assert.match(build, /-x "\*\.pem"/, "the zip does not exclude the key");
+    const keys = walk(EXT)
+      .filter(f => /\.(pem|key|p12|pfx)$/i.test(f))
+      .map(f => path.relative(EXT, f));
+    assert.deepEqual(keys, [], "a private key is inside the extension folder");
+  });
 
-    // Whatever happens, a private key must not be inside the packaged folders.
-    for (const dir of ["src", "icons"]) {
-      const walk = (at) => fsp.readdirSync(at, { withFileTypes: true }).flatMap(e =>
-        e.isDirectory() ? walk(path.join(at, e.name)) : [e.name]);
-      const keys = walk(path.join(EXT, dir)).filter(n => n.endsWith(".pem"));
-      assert.deepEqual(keys, [], `a key is inside ${dir}, which ships`);
+  test("the build refuses to package when a key is there", () => {
+    // Behaviour, not wording. Asserting that build.js contains the sentence
+    // passes just as happily when the check has been downgraded to a warning,
+    // which is what a mutation of exactly that shape proved.
+    const fsp = require("node:fs");
+    const { execFileSync } = require("node:child_process");
+    const planted = path.join(EXT, "src", "planted-by-test.pem");
+
+    const runBuild = () => {
+      try {
+        execFileSync(process.execPath, ["build.js"], { cwd: EXT, stdio: ["ignore", "pipe", "pipe"] });
+        return { code: 0 };
+      } catch (err) {
+        return { code: err.status, out: String(err.stdout || "") + String(err.stderr || "") };
+      }
+    };
+
+    assert.equal(runBuild().code, 0, "the build should pass with no key present");
+
+    fsp.writeFileSync(planted, "-----BEGIN PRIVATE KEY-----\nnot a real key\n");
+    try {
+      const withKey = runBuild();
+      assert.notEqual(withKey.code, 0, "the build packaged an extension containing a private key");
+      assert.match(withKey.out, /private key inside the extension/);
+    } finally {
+      fsp.rmSync(planted, { force: true });
     }
+
+    assert.equal(runBuild().code, 0, "the test left the tree dirty");
+  });
+
+  test("a key anywhere is ignored, not one path", () => {
+    const gitignore = require("node:fs").readFileSync(path.join(EXT, "..", ".gitignore"), "utf8");
+    assert.match(gitignore, /\*\.pem/);
+    assert.match(gitignore, /\.secrets\//, "and the place it now lives");
   });
 
   test("only the Dolluz site may send the extension a message", () => {

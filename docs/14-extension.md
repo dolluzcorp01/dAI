@@ -260,7 +260,8 @@ disagree.
 
 ## The id is pinned by a key
 
-`manifest.json` carries a `key`: the public half of `extension/key.pem`. Chrome
+`manifest.json` carries a `key`: the public half of `.secrets/kody-extension.pem`.
+Chrome
 derives the extension id from it, so every machine that loads this unpacked
 gets the same id and the server needs one `EXTENSION_IDS` entry rather than one
 per tester. Without it Chrome derives the id from the folder path, which
@@ -269,10 +270,17 @@ differs on every machine.
 The id is **`ikamkodfpkklimdldhfpnhmmlapdjpmn`**, and `node extension/build.js`
 prints it so nobody has to open Chrome to find out.
 
-`extension/key.pem` is gitignored and must be kept: losing it means a new id for
-everyone, and the Web Store listing in Phase 3 has to be created with this same
-key or the published extension will have a different id again. Committing it
-would let anyone publish an update as us.
+The private half lives in `.secrets/` at the repository root, **outside the
+extension folder**, and `node extension/build.js` refuses to build if any
+`.pem`, `.key`, `.p12` or `.pfx` appears anywhere under `extension/`. It used to
+sit in `extension/`, where Chrome warned "This extension includes the key file
+... You probably don't want to do that" and a Web Store package would have
+carried it. Whoever holds it can publish an update as us.
+
+It is gitignored and must be kept: losing it means a new id for everyone, and
+the Web Store listing in Phase 3 has to be created with this same key or the
+published extension will have a different id again. Keep a copy somewhere that
+is not this machine.
 
 ---
 

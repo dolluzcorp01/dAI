@@ -8,11 +8,11 @@ build/
 *.zip
 .DS_Store
 
-# The extension signing key. Losing it means a new extension id for everyone,
-# so keep a copy somewhere safe. Committing it would let anyone publish an
-# update as us.
-extension/key.pem
-extension/*.pem
+# Secrets kept beside the project but never in it. The extension signing key
+# lives here rather than in extension/, because Chrome warns about a key file
+# inside a loaded extension and a Web Store package would carry it.
+.secrets/
+*.pem
 
 # Build artefacts from the install-elsewhere route (docs/16-pilot-runbook.md).
 # node_modules is built on a machine that can afford npm ci, archived with a

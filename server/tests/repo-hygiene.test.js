@@ -67,7 +67,8 @@ describe("nothing secret or generated is tracked", () => {
     // ones where being wrong is expensive: the signing key decides the
     // extension's identity, and the env files hold every secret the app has.
     const tracked = new Set(trackedFiles());
-    for (const f of [".env", "deploy/.env.production", "extension/key.pem"]) {
+    for (const f of [".env", "deploy/.env.production", "extension/key.pem",
+                     ".secrets/kody-extension.pem"]) {
       assert.ok(!tracked.has(f), `${f} is tracked, and must never be`);
     }
   });
@@ -76,7 +77,7 @@ describe("nothing secret or generated is tracked", () => {
     // Being untracked today is not the same as being safe tomorrow: the next
     // `git add` that sweeps the tree would take them.
     const ignore = fs.readFileSync(path.join(REPO, ".gitignore"), "utf8");
-    for (const pattern of [".env", "key.pem", "node_modules"]) {
+    for (const pattern of [".env", "pem", "node_modules", ".secrets"]) {
       assert.match(ignore, new RegExp(pattern.replace(".", "\\.")),
         `.gitignore says nothing about ${pattern}`);
     }

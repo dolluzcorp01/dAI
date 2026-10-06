@@ -185,7 +185,7 @@ function handOff(code) {
       chrome.runtime.sendMessage(callback.extensionId, { type: "kody:auth-code", code, state },
         (reply) => {
           if (reply && reply.ok) {
-            $("handoff-note").textContent = "Kody is signed in. You can close this tab.";
+            signedIn();
             return;
           }
           location.assign(target.toString());
@@ -195,6 +195,22 @@ function handOff(code) {
   }
 
   location.assign(target.toString());
+}
+
+/**
+ * Finished. The spinner becomes a tick and the words change with it.
+ *
+ * It used to say "Kody is signed in, you can close this tab" underneath a
+ * spinner that was still turning, which reads as still working: the one thing
+ * on the page that moves says "wait" while the text says "done".
+ */
+function signedIn() {
+  $("spinner").classList.add("done");
+  $("handoff-title").textContent = "Signed in";
+  $("handoff-note").textContent = "Kody is signed in. You can close this tab.";
+  for (const id of ["step-1", "step-2", "step-3"]) {
+    $(id).classList.add("done");
+  }
 }
 
 /* ---------------- forgot password ---------------- */

@@ -138,11 +138,17 @@ if (manifest.key) {
     + "so every machine gets a different one");
 }
 
-/* The private half must never be packaged, and must never be committed. */
-for (const stray of fs.readdirSync(ROOT)) {
-  if (!stray.endsWith(".pem")) continue;
-  const ignored = read(path.join("..", ".gitignore")).includes("extension/key.pem");
-  if (!ignored) problems.push(`${stray} is present and .gitignore does not cover it`);
+/* No private key anywhere under the extension, at any depth.
+   Chrome warns about a key file inside a loaded extension ("You probably don't
+   want to do that"), and a Web Store package built from this folder would carry
+   it. Whoever holds it can publish an update as us. The key lives in .secrets/
+   at the repository root instead, which is outside everything this packages. */
+const keysHere = walk(ROOT)
+  .filter(f => /\.(pem|key|p12|pfx)$/i.test(f))
+  .map(f => path.relative(ROOT, f));
+for (const key of keysHere) {
+  problems.push(`${key} is a private key inside the extension. Move it to .secrets/ at the `
+    + "repository root: Chrome warns about it and a Web Store package would include it.");
 }
 
 /* store requirements that are easy to forget */

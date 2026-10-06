@@ -422,3 +422,20 @@ names the commit, and prints the command to get back on the branch.
 One mutation did not fail at first: turning the guard off left the words
 "detached HEAD" in the echo lines, which a test searching for that text still
 matched. The test asserts on the condition now.
+
+## Two from the first production sign in (2026-10-06)
+
+Both found by Shoban with the extension running against production.
+
+| File | Change | Why |
+|---|---|---|
+| `.secrets/kody-extension.pem` | the signing key moved out of `extension/` | Chrome warns "This extension includes the key file ... You probably don't want to do that" about a key inside a loaded extension, and a Web Store package built from that folder would have carried it. Whoever holds it can publish an update as us. |
+| `extension/build.js` | refuses to build when any `.pem`, `.key`, `.p12` or `.pfx` is anywhere under `extension/` | A warning would not have stopped it. Proven by planting a key at the top level and under `src/`: the build fails both times. |
+| `.gitignore` | `*.pem` and `.secrets/` | One path was ignored before, so a key anywhere else was not. |
+| `server/public/extension/authorize/*` | the spinner becomes a tick, and the heading changes to "Signed in" | The tab said "Kody is signed in. You can close this tab" underneath a spinner that was still turning. The one thing on the page that moves said wait while the text said done. |
+
+A mutation worth recording. The first version of the build test asserted that
+`build.js` contained the sentence about private keys, which passes just as
+happily when the check has been downgraded from a failure to a warning, as a
+mutation of exactly that shape proved. The test now runs the build with a key
+planted and asserts a non-zero exit.
