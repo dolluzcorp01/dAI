@@ -61,7 +61,7 @@ export async function isSignedIn(storage = chrome.storage.local) {
  * The site signs the person in and redirects back with a code.
  */
 export async function beginSignIn({
-  storage = chrome.storage.local, redirectUri, siteBase = SITE_BASE,
+  storage = chrome.storage.local, redirectUri, siteBase = SITE_BASE, flow = "webauth",
 } = {}) {
   const state = randomState();
   await storage.set({ [KEY_STATE]: { state, createdAt: Date.now() } });
@@ -70,6 +70,16 @@ export async function beginSignIn({
   url.searchParams.set("state", state);
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("surface", "extension");
+
+  // dAI: which way the page should hand the code back.
+  //
+  // Inside launchWebAuthFlow the page is still on the Dolluz site, so
+  // externally_connectable matches and chrome.runtime.sendMessage works. It
+  // must NOT use it there: Chrome's auth window resolves on the redirect, and
+  // the worker closing that window instead looks exactly like the person
+  // dismissing it. Sign in then succeeded and reported "The user did not
+  // approve access" at the same time.
+  url.searchParams.set("flow", flow);
   return { url: url.toString(), state };
 }
 

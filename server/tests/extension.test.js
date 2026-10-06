@@ -411,6 +411,36 @@ describe("where the extension talks to", () => {
     assert.match(gitignore, /\.secrets\//, "and the place it now lives");
   });
 
+  test("a session that exists beats a cancellation that arrives late", () => {
+    // Chrome cannot tell a window that closed itself from one the person
+    // dismissed. When the code has already been exchanged, a cancellation is
+    // not a failure, and showing an error beside a working session is worse
+    // than either on its own.
+    const worker = readExt("src/background/service-worker.js");
+    const signIn = worker.slice(worker.indexOf("async function signIn("),
+      worker.indexOf("async function alreadySignedIn("));
+
+    assert.match(signIn, /catch \(err\)[\s\S]*alreadySignedIn\(\)/,
+      "a failed flow should check whether the sign in landed anyway");
+    const recovered = signIn.indexOf("alreadySignedIn()");
+    const reportsFailure = signIn.indexOf("flow_failed");
+    assert.ok(recovered > 0 && recovered < reportsFailure,
+      "it reports the failure before checking whether it actually failed");
+
+    assert.match(worker, /async function alreadySignedIn\(\)[\s\S]*isSignedIn\(\)/,
+      "and the check should be whether there is a session, not a guess");
+  });
+
+  test("the flow is told to the page, not inferred by it", () => {
+    // The page cannot tell Chrome's auth window from an ordinary tab, and
+    // getting it wrong is what caused the race.
+    const worker = readExt("src/background/service-worker.js");
+    const auth = readExt("src/shared/auth.js");
+
+    assert.match(worker, /flow: useWebAuthFlow \? "webauth" : "tab"/);
+    assert.match(auth, /searchParams\.set\("flow", flow\)/);
+  });
+
   test("opening Kody twice focuses the panel rather than making a second one", () => {
     // The bubble and the popup both open Kody, and each used to create its own
     // window. Two panels side by side both say connected, share one session and
@@ -525,7 +555,12 @@ describe("where the extension talks to", () => {
 
   test("the sign in URL follows the configured server, not a constant", () => {
     const worker = readExt("src/background/service-worker.js");
-    assert.match(worker, /beginSignIn\(\{ redirectUri, siteBase \}\)/,
+    // The arguments, not their exact spelling on one line: the call grew a
+    // `flow` argument and this assertion failed for a reason that had nothing
+    // to do with what it is checking.
+    const call = worker.slice(worker.indexOf("beginSignIn({"));
+    assert.match(call.slice(0, 200), /redirectUri/);
+    assert.match(call.slice(0, 200), /siteBase/,
       "sign in would open production even when pointed at a local server");
     assert.match(worker, /completeSignIn\(redirect, \{ apiBase \}\)/,
       "the code would be exchanged against production");

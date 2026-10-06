@@ -25,6 +25,22 @@ const redirectUri = params.get("redirect_uri") || "";
 const surface = params.get("surface") || "extension";
 
 /**
+ * Which way the extension wants the code back.
+ *
+ *   webauth  Chrome's own sign in window. It resolves when the page navigates
+ *            to the extension callback, so the page MUST redirect. Posting the
+ *            code to the extension instead leaves Chrome waiting, and the
+ *            extension closing this window to tidy up is indistinguishable
+ *            from the person dismissing it: the sign in works and reports
+ *            "The user did not approve access" in the same second.
+ *   tab      An ordinary tab, where that redirect would land on a page that
+ *            does not exist. Post the code to the extension instead.
+ *
+ * Absent means an older extension. Redirect, which is the path Chrome drives.
+ */
+const flow = params.get("flow") === "tab" ? "tab" : "webauth";
+
+/**
  * https://<32 letters a to p>.chromiumapp.org/... is the extension's own
  * callback: Chrome mints that host from the extension id, and only that
  * extension can receive it. http is allowed on this machine so a developer can
@@ -177,7 +193,8 @@ function handOff(code) {
   target.searchParams.set("code", code);
   target.searchParams.set("state", state);
 
-  const canMessage = callback.extensionId
+  const canMessage = flow === "tab"
+    && callback.extensionId
     && typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage;
 
   if (canMessage) {

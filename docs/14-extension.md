@@ -204,6 +204,27 @@ worker closes that tab about a second later, after the page has shown its tick.
 If the worker is stopped before that fires, the page still says what happened
 and the tab can be closed by hand.
 
+**Which route the page takes is decided by the worker, not guessed by the
+page.** `beginSignIn` puts `flow=webauth` or `flow=tab` in the URL:
+
+- `webauth` is Chrome's own sign in window, which resolves when the page
+  navigates to the extension callback. The page redirects and does not message
+  the extension at all.
+- `tab` is an ordinary tab, where that redirect would land on a page that does
+  not exist. The page messages the extension instead.
+
+Inside Chrome's window the page is still on the Dolluz site, so
+`externally_connectable` matches and `chrome.runtime.sendMessage` works there
+too. It must not be used: Chrome is waiting for the navigation, and the worker
+closing that window to tidy up is indistinguishable from the person dismissing
+it. Sign in succeeded and reported "The user did not approve access" in the same
+second, which is how this was found.
+
+Belt and braces for any ordering that still surprises us: when
+`launchWebAuthFlow` reports a cancellation, the worker checks whether a session
+exists before believing it. One that does beats whatever the flow says
+happened.
+
 ---
 
 ## Which server it talks to

@@ -460,3 +460,22 @@ this repo:  "function signedIn" x1
 `cache-control: no-store` was already set, so it was not a cache. The checkout
 on the box had not been updated. Static files are read per request, so a pull is
 enough; no restart, no deploy.
+
+## The auto-close raced Chrome's own sign in window (2026-10-06)
+
+Caused by the previous commit. Shoban watched the popup through the first five
+seconds rather than only the end state: tick, tab closes, popup says "The user
+did not approve access", then a few seconds later shows him signed in.
+
+| File | Change | Why |
+|---|---|---|
+| `extension/src/shared/auth.js` | `beginSignIn` puts `flow=webauth` or `flow=tab` in the URL | The page cannot tell Chrome's auth window from an ordinary tab. Inside the auth window it is still on the Dolluz site, so `externally_connectable` matches and `sendMessage` works there too, and taking that route leaves Chrome waiting for a navigation that never comes. |
+| `server/public/extension/authorize/authorize.js` | messages the extension only when `flow=tab`, redirects otherwise | Removes the race rather than papering over it. An absent `flow` means an older extension and redirects, which is the path Chrome drives. |
+| `extension/src/background/service-worker.js` | a cancellation is checked against whether a session exists | Chrome cannot tell a window that closed itself from one the person dismissed, so a cancellation arriving after the tokens are stored is not a failure. Showing an error beside a working session is worse than either on its own. |
+
+Three mutations caught, including the exact regression: messaging the extension
+inside Chrome's own flow again fails two tests.
+
+**Not verified here:** no browser has run this. The routing and the recovery are
+proven by tests; that Chrome stops reporting the cancellation is Shoban's to
+confirm, by watching the popup through the first five seconds as before.

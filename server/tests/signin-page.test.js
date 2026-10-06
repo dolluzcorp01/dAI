@@ -53,7 +53,7 @@ after(async () => {
  * Enough DOM for this page and no more. Every id the HTML declares exists, so
  * a typo in the page shows up as a missing element rather than passing.
  */
-function fakeDom({ state, redirectUri, fetchImpl, chromeStub }) {
+function fakeDom({ state, redirectUri, fetchImpl, chromeStub, flow }) {
   // Start each element where the HTML starts it, hidden attribute included:
   // the page relies on #refused and #handoff being hidden until it says so.
   const tags = [...PAGE_HTML.matchAll(/<[a-z0-9]+[^>]*\bid="([a-z0-9-]+)"[^>]*>/g)];
@@ -96,7 +96,8 @@ function fakeDom({ state, redirectUri, fetchImpl, chromeStub }) {
 
   const navigations = [];
   const search = `?state=${encodeURIComponent(state)}`
-    + `&redirect_uri=${encodeURIComponent(redirectUri)}&surface=extension`;
+    + `&redirect_uri=${encodeURIComponent(redirectUri)}&surface=extension`
+    + (flow ? `&flow=${flow}` : "");
 
   const context = {
     document: {
@@ -262,7 +263,8 @@ describe("the handoff says when it has finished", () => {
     // turning. The one thing on the page that moves said wait while the text
     // said done, so it read as still working.
     const dom = fakeDom({
-      state: "k".repeat(24), redirectUri: CALLBACK, chromeStub: acceptingChrome(true),
+      state: "k".repeat(24), redirectUri: CALLBACK, flow: "tab",
+      chromeStub: acceptingChrome(true),
     });
     dom.el("email").value = EMAIL;
     dom.el("password").value = PASSWORD;
@@ -280,7 +282,8 @@ describe("the handoff says when it has finished", () => {
     // The extension only accepts a message from its own trusted origin. If it
     // says no, the callback redirect is still the way home.
     const dom = fakeDom({
-      state: "l".repeat(24), redirectUri: CALLBACK, chromeStub: acceptingChrome(false),
+      state: "l".repeat(24), redirectUri: CALLBACK, flow: "tab",
+      chromeStub: acceptingChrome(false),
     });
     dom.el("email").value = EMAIL;
     dom.el("password").value = PASSWORD;
@@ -289,6 +292,69 @@ describe("the handoff says when it has finished", () => {
     assert.equal(dom.navigations.length, 1, "it should fall back to the callback");
     assert.ok(!dom.el("spinner").classList.contains("done"),
       "nothing finished, so nothing should say it did");
+  });
+});
+
+describe("which way it hands the code back", () => {
+  /** A chrome that records whether it was asked, and accepts. */
+  const watchfulChrome = () => {
+    const asked = [];
+    return {
+      asked,
+      runtime: {
+        sendMessage(extensionId, message, callback) {
+          asked.push(message);
+          callback({ ok: true });
+        },
+      },
+    };
+  };
+
+  const signIn = async (dom) => {
+    dom.el("email").value = EMAIL;
+    dom.el("password").value = PASSWORD;
+    await dom.fire("form", "submit");
+  };
+
+  test("flow=webauth redirects, and never messages the extension", async () => {
+    // Chrome's own sign in window resolves on the navigation to the callback.
+    // Messaging the extension instead leaves Chrome waiting, and the extension
+    // closing that window to tidy up looks exactly like the person dismissing
+    // it: the sign in works and says "The user did not approve access" at the
+    // same time. That is the fault this prevents.
+    const chromeStub = watchfulChrome();
+    const dom = fakeDom({
+      state: "m".repeat(24), redirectUri: CALLBACK, flow: "webauth", chromeStub,
+    });
+    await signIn(dom);
+
+    assert.equal(chromeStub.asked.length, 0,
+      "it messaged the extension inside Chrome's own flow, which causes the race");
+    assert.equal(dom.navigations.length, 1, "it must navigate to the callback");
+    assert.match(dom.navigations[0], /chromiumapp\.org/);
+  });
+
+  test("flow=tab messages the extension, because the redirect goes nowhere", async () => {
+    const chromeStub = watchfulChrome();
+    const dom = fakeDom({
+      state: "n".repeat(24), redirectUri: CALLBACK, flow: "tab", chromeStub,
+    });
+    await signIn(dom);
+
+    assert.equal(chromeStub.asked.length, 1, "an ordinary tab has to hand the code over");
+    assert.equal(chromeStub.asked[0].type, "kody:auth-code");
+    assert.equal(dom.navigations.length, 0);
+    assert.ok(dom.el("spinner").classList.contains("done"));
+  });
+
+  test("no flow at all redirects, which is the path Chrome drives", async () => {
+    // An older extension. The safe assumption is the one Chrome is waiting on.
+    const chromeStub = watchfulChrome();
+    const dom = fakeDom({ state: "o".repeat(24), redirectUri: CALLBACK, chromeStub });
+    await signIn(dom);
+
+    assert.equal(chromeStub.asked.length, 0);
+    assert.equal(dom.navigations.length, 1);
   });
 });
 

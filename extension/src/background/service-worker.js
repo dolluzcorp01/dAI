@@ -77,17 +77,27 @@ async function signIn() {
     };
   }
 
-  const { url } = await beginSignIn({ redirectUri, siteBase });
+  const useWebAuthFlow = !!(chrome.identity && chrome.identity.launchWebAuthFlow);
+  const { url } = await beginSignIn({
+    redirectUri, siteBase, flow: useWebAuthFlow ? "webauth" : "tab",
+  });
 
   // launchWebAuthFlow gives us the redirect without leaving a tab behind.
-  if (chrome.identity && chrome.identity.launchWebAuthFlow) {
+  if (useWebAuthFlow) {
     try {
       const redirect = await chrome.identity.launchWebAuthFlow({ url, interactive: true });
-      if (!redirect) return { ok: false, error: "cancelled", message: "Sign in was cancelled." };
+      if (!redirect) return (await alreadySignedIn()) || cancelled();
       const out = await completeSignIn(redirect, { apiBase });
       await updateBadge();
       return out;
     } catch (err) {
+      // A session that exists beats whatever the flow says happened. Chrome
+      // cannot tell a window that closed itself from one the person dismissed,
+      // so a cancellation arriving after the tokens are already stored is not
+      // a failure, and showing an error next to a working session is worse than
+      // either on its own.
+      const recovered = await alreadySignedIn();
+      if (recovered) return recovered;
       return { ok: false, error: "flow_failed", message: String(err.message || err) };
     }
   }
@@ -106,6 +116,16 @@ async function signIn() {
   await chrome.tabs.create({ url });
   return { ok: false, error: "manual", message: "Finish signing in on the Dolluz tab." };
 }
+
+/** Did the sign in already land by another route? Then it worked. */
+async function alreadySignedIn() {
+  if (!(await isSignedIn())) return null;
+  const { user } = await getTokens();
+  await updateBadge();
+  return { ok: true, user };
+}
+
+const cancelled = () => ({ ok: false, error: "cancelled", message: "Sign in was cancelled." });
 
 /** Does Chrome let us talk to these bases at all? */
 async function hasHostAccess(...bases) {
