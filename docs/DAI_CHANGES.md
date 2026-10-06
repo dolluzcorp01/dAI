@@ -341,3 +341,14 @@ thousand identical characters, which gzip reduces to under 300 bytes, so every
 "big enough" dump tripped the size floor and three tests failed for a reason
 that had nothing to do with what they were testing. The padding is random hex
 now.
+
+## Two more the first deploy found (2026-10-06)
+
+| File | Change | Why |
+|---|---|---|
+| `deploy/deploy.sh`, `deploy/backup.sh` | mode 100755 in the index | They shipped as 100644, so a fresh clone could not run them and `deploy.sh` failed with "Permission denied" on `backup.sh`. Setting the bit on one machine does nothing: git records the mode, and the clone is what matters. |
+| `deploy/backup.sh` | reads `../.env`, with an `ENV_FILE` override | It wanted `.env.production` in the deploy directory, left over from the Docker design where that was the compose `env_file`. `deploy.sh`, pm2 and the application all read `.env` at the root, and step 1e creates only that, so the first deploy could not work as written. One filename. |
+| `server/tests/repo-hygiene.test.js` | both, as tests | The mode is checked through `git ls-files -s`, so it fails on what a clone would get rather than on what this working tree happens to have. The env file check reads all three scripts and fails if they disagree. |
+
+Both failures stopped cleanly with "nothing was changed", which is the only
+good thing to say about them.

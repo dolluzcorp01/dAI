@@ -83,6 +83,43 @@ describe("nothing secret or generated is tracked", () => {
   });
 });
 
+describe("shell scripts are executable, and agree on one env file", () => {
+  /** Mode as git records it, which is what a fresh clone gets. */
+  function modeOf(rel) {
+    const out = execFileSync("git", ["ls-files", "-s", rel], { cwd: REPO, encoding: "utf8" });
+    return out.trim().split(/\s+/)[0] || null;
+  }
+
+  test("deploy scripts carry the execute bit in git", () => {
+    // Setting it on one machine is not enough: git stores the mode, and a
+    // clone without it fails with "Permission denied" on the first run. That
+    // is how the first real deploy stopped.
+    for (const script of ["deploy/deploy.sh", "deploy/backup.sh"]) {
+      assert.equal(modeOf(script), "100755", `${script} is not executable in a fresh clone`);
+    }
+  });
+
+  test("every script reads the same env file", () => {
+    // backup.sh wanted .env.production in deploy/, while deploy.sh, pm2 and the
+    // application all read .env at the root. Step 1e creates only .env, so the
+    // first deploy could not work. One filename.
+    const backup = fs.readFileSync(path.join(REPO, "deploy/backup.sh"), "utf8");
+    const deploy = fs.readFileSync(path.join(REPO, "deploy/deploy.sh"), "utf8");
+    const pm2 = fs.readFileSync(path.join(REPO, "ecosystem.config.js"), "utf8");
+
+    const code = (src) => src
+      .split(/\r?\n/)
+      .filter(line => !/^\s*[#/]/.test(line))
+      .join(" | ");
+
+    assert.ok(!/\.env\.production/.test(code(backup)),
+      "backup.sh still wants .env.production, which nothing else creates");
+    assert.match(code(backup), /ENV_FILE/, "and it should be overridable");
+    assert.match(code(deploy), /\$APP_DIR\/\.env/);
+    assert.match(code(pm2), /--env-file-if-exists=.*\.env/);
+  });
+});
+
 describe("node_modules is not tracked anywhere", () => {
   test("not the directory, not an archive of it", () => {
     const offenders = trackedFiles().filter(f => /(^|\/)node_modules(\/|\.|$)/.test(f));

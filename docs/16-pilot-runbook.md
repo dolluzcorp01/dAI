@@ -323,6 +323,11 @@ cd /var/www/dolluzcorp.com/dai
 ./deploy/deploy.sh --skip-install
 ```
 
+The scripts carry the execute bit in git, so a fresh clone can run them. If a
+checkout ever loses it, `chmod +x deploy/*.sh`. Both scripts read **one** env
+file, `.env` at the repository root: the same one pm2 loads and the same one
+step 1e creates. There is no `.env.production`.
+
 `--skip-install` because `node_modules` was built on another machine and copied
 here: `npm ci` peaks around 228 MB on a box with 1 GB shared between thirteen
 apps. Skipping the install does not skip the question of whether the tree is

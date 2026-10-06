@@ -5,6 +5,9 @@
 #   ./backup.sh                 dump, verify, prune
 #   ./backup.sh --verify-only FILE   check an existing dump
 #
+# Reads ../.env, the same file the application and deploy.sh read. Override with
+# ENV_FILE=/some/other/.env
+#
 # deploy.sh calls this before every migration, so it is also the thing standing
 # between a bad migration and a lost database.
 #
@@ -86,13 +89,19 @@ fi
 
 # ---------------------------------------------------------------- settings
 
-[ -f .env.production ] || die "no .env.production here. Copy .env.example and fill it in."
+# ONE env file, the same one the application and deploy.sh read: .env at the
+# repository root. This used to look for .env.production in the deploy directory,
+# left over from the Docker design where that was the compose env_file, and the
+# first real deploy stopped here because 1e had only ever created .env.
+ENV_FILE="${ENV_FILE:-$DEPLOY_DIR/../.env}"
 
-# Read only the keys needed, rather than sourcing the whole file: .env.production
-# holds API keys and secrets, and this script has no business with them.
+[ -f "$ENV_FILE" ] || die "no env file at $ENV_FILE. Copy .env.example to .env and fill it in."
+
+# Read only the keys needed, rather than sourcing the whole file: .env holds API
+# keys and secrets, and this script has no business with any of them.
 env_value() {
   local key="$1"
-  sed -n "s/^${key}=//p" .env.production | tail -1 | sed 's/^"//; s/"$//; s/^'"'"'//; s/'"'"'$//'
+  sed -n "s/^${key}=//p" "$ENV_FILE" | tail -1 | sed 's/^"//; s/"$//; s/^'"'"'//; s/'"'"'$//'
 }
 
 DB_HOST="$(env_value DB_HOST)"
@@ -101,10 +110,10 @@ DB_NAME="$(env_value DB_NAME)"
 DB_USER="$(env_value DB_USER)"
 DB_PASSWORD="$(env_value DB_PASSWORD)"
 
-[ -n "$DB_HOST" ] || die "DB_HOST is not set in .env.production"
-[ -n "$DB_NAME" ] || die "DB_NAME is not set in .env.production"
-[ -n "$DB_USER" ] || die "DB_USER is not set in .env.production"
-[ -n "$DB_PASSWORD" ] || die "DB_PASSWORD is not set in .env.production"
+[ -n "$DB_HOST" ] || die "DB_HOST is not set in $ENV_FILE"
+[ -n "$DB_NAME" ] || die "DB_NAME is not set in $ENV_FILE"
+[ -n "$DB_USER" ] || die "DB_USER is not set in $ENV_FILE"
+[ -n "$DB_PASSWORD" ] || die "DB_PASSWORD is not set in $ENV_FILE"
 DB_PORT="${DB_PORT:-3306}"
 
 mkdir -p "$BACKUP_DIR"
