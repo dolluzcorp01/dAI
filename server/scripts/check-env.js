@@ -133,9 +133,15 @@ if (fallback === "openai" && !present("OPENAI_API_KEY")) {
 if (fallback === "anthropic" && !present("ANTHROPIC_API_KEY")) {
   fail("MODEL_FALLBACK_PROVIDER", "is anthropic and ANTHROPIC_API_KEY is empty.");
 }
-if (primary === "mock") {
-  note("MODEL_PRIMARY_PROVIDER is mock: canned answers, no model is called. "
-    + "Deliberate for a first deploy, and config.js refuses it once NODE_ENV=production.");
+if (primary === "mock" || fallback === "mock") {
+  if (isProd && env.ALLOW_MOCK_MODEL !== "1") {
+    fail("MODEL_PRIMARY_PROVIDER", "is mock and NODE_ENV is production, so the app will "
+      + "refuse to start. Set ALLOW_MOCK_MODEL=1 if this is a deliberate plumbing deploy.");
+  } else {
+    note("THE MOCK PROVIDER IS IN USE: every answer is canned and no model is called. "
+      + "Deliberate for a first deploy. Remove it, and ALLOW_MOCK_MODEL, before anyone "
+      + "relies on an answer.");
+  }
 }
 
 /* ---------------- things that only matter in a test environment ---------------- */

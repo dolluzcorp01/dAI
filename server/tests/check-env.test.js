@@ -31,6 +31,9 @@ const GOOD = {
   EXTENSION_IDS: "ikamkodfpkklimdldhfpnhmmlapdjpmn",
   MODEL_PRIMARY_PROVIDER: "mock",
   MODEL_FALLBACK_PROVIDER: "",
+  // The first deploy runs on mock deliberately, and production demands that
+  // it be said out loud rather than inferred.
+  ALLOW_MOCK_MODEL: "1",
 };
 
 /**
@@ -153,10 +156,20 @@ describe("the extension", () => {
 });
 
 describe("what it reports without failing", () => {
-  test("mock is a note, not an error, because a first deploy runs on it", () => {
-    const r = check({ MODEL_PRIMARY_PROVIDER: "mock" });
+  test("mock with the opt-in is a note, because a first deploy runs on it", () => {
+    const r = check({ MODEL_PRIMARY_PROVIDER: "mock", ALLOW_MOCK_MODEL: "1" });
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /canned answers/);
+    assert.match(r.out, /canned/);
+    assert.match(r.out, /before anyone relies on an answer/,
+      "it should say when to take it out, not just that it is on");
+  });
+
+  test("mock in production without the opt-in is an error, since the app will refuse", () => {
+    // The app itself refuses this, so the checker should say so before the
+    // deploy gets as far as pm2 restarting into a crash loop.
+    const r = check({ MODEL_PRIMARY_PROVIDER: "mock", ALLOW_MOCK_MODEL: null });
+    assert.equal(r.code, 1);
+    assert.match(r.out, /ALLOW_MOCK_MODEL=1/);
   });
 
   test("it names keys the template has that this file does not", () => {

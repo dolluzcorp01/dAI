@@ -173,8 +173,25 @@ if (config.env === "production") {
       + "Set FILE_SCANNER=clamav, or STORAGE_DRIVER=none to turn file sharing off."
     );
   }
+  // dAI: the mock provider in production is refused, UNLESS somebody has said
+  // so on purpose. The first deploy of the pilot runs on mock deliberately, to
+  // prove nginx, pm2, MySQL, Redis, sign in and the extension before a real key
+  // and a real bill are involved. The alternative was NODE_ENV=development,
+  // which would switch off every other guard here, including the one that lets
+  // a local Kody password stand in for a dAdmin one. Working around one guard
+  // by disabling six is not a trade worth making.
   if (config.ai.primaryProvider === "mock" || config.ai.fallbackProvider === "mock") {
-    throw new Error("Refusing to start in production with the mock model provider.");
+    if (process.env.ALLOW_MOCK_MODEL !== "1") {
+      throw new Error(
+        "Refusing to start in production with the mock model provider. "
+        + "If this is a plumbing deploy and you mean it, set ALLOW_MOCK_MODEL=1."
+      );
+    }
+    console.warn(
+      "WARNING: running in production with the MOCK model provider. "
+      + "Every answer is canned and no model is called. "
+      + "Remove ALLOW_MOCK_MODEL before anyone relies on an answer."
+    );
   }
   if (config.mail.driver === "memory" || config.push.driver === "memory") {
     throw new Error("Refusing to start in production with a memory transport: mail and push would vanish.");

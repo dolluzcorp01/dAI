@@ -243,9 +243,14 @@ FILE_SCANNER=none
 MAIL_DRIVER=none
 PUSH_DRIVER=none
 
-# The first deploy runs on mock. The real key goes in at step 3, not before.
+# The first deploy runs on mock. The real key goes in at step 4, not before.
+# NODE_ENV stays production: the alternative is running the pilot in development
+# mode, which switches off every other guard, including the one that lets a
+# local Kody password stand in for a dAdmin one. ALLOW_MOCK_MODEL says the mock
+# is deliberate, warns loudly at every boot, and comes out at step 4.
 MODEL_PRIMARY_PROVIDER=mock
 MODEL_FALLBACK_PROVIDER=
+ALLOW_MOCK_MODEL=1
 ```
 
 Those are every line that must change. Do not rely on having read the list
@@ -318,6 +323,14 @@ The model stays off for this. The point of this step is to prove the plumbing:
 nginx, pm2, MySQL, Redis, dAdmin sign-in and the extension. A wrong Anthropic
 key or an unexpected model bill should not be mixed into that.
 
+**NODE_ENV is `production` for this deploy and every one after it.** The mock
+provider is allowed by `ALLOW_MOCK_MODEL=1`, which is a single deliberate
+exception that warns at every boot. It is not `NODE_ENV=development`: that would
+also switch off the Redis requirement, the storage and scanner checks, the mail
+and push transports, and the rule that a local Kody password cannot stand in for
+a dAdmin one. Working around one guard by disabling six is not a trade worth
+making, and the app would be running in a mode the pilot is not testing.
+
 ```bash
 cd /var/www/dolluzcorp.com/dai
 ./deploy/deploy.sh --skip-install
@@ -383,8 +396,9 @@ and sign in with a dAdmin password. That exercises the whole path: the page, the
 one-time code, the token exchange, and the cross-database read of
 `dadmin.employee`.
 
-Last, `pm2 save` so the app comes back after a reboot, and
-`pm2 startup` if it has never been run on this box.
+Last, `pm2 save` so the app comes back after a reboot, and `pm2 startup` if it
+has never been run on this box. The app is `dai-backend`, matching every other
+app on the server.
 
 ---
 

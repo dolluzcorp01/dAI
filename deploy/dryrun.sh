@@ -45,12 +45,27 @@ git clone --quiet "$REPO" "$APP" || { echo "clone failed"; exit 1; }
 cp "$REPO/.env" "$APP/.env"
 # The port and the env this run should use, overriding the developer's .env.
 sed -i "s/^PORT=.*/PORT=$PORT/" "$APP/.env"
+# As the box runs it: production, on mock, with the opt-in said out loud,
+# and file sharing, mail and push off.
+sed -i "s/^NODE_ENV=.*/NODE_ENV=production/" "$APP/.env"
+grep -q "^ALLOW_MOCK_MODEL=" "$APP/.env" || echo "ALLOW_MOCK_MODEL=1" >> "$APP/.env"
+for k in STORAGE_DRIVER FILE_SCANNER MAIL_DRIVER PUSH_DRIVER; do
+  sed -i "s/^$k=.*/$k=none/" "$APP/.env"
+done
 cp -r "$REPO/server/node_modules" "$APP/server/node_modules"
 
 # The clone is at HEAD, which is the committed state. What needs testing is the
 # WORKING TREE, because the whole point is to run the change before pushing it.
+#
+# All of it, not just the shell scripts. Copying only deploy/ once meant a change
+# to config.js was not in the run at all, and the deploy failed against the old
+# committed code while the new code sat untested a directory away.
 cp "$REPO/deploy/"*.sh "$APP/deploy/"
 chmod +x "$APP/deploy/"*.sh
+cp -r "$REPO/server/src" "$APP/server/"
+cp -r "$REPO/server/scripts" "$APP/server/"
+cp "$REPO/server/package.json" "$REPO/server/package-lock.json" "$APP/server/"
+cp "$REPO/ecosystem.config.js" "$APP/" 2>/dev/null || true
 echo "  clone at $(git -C "$APP" rev-parse --short HEAD), with the working tree's deploy scripts"
 
 say "stubbing pm2, so the readiness poll has a real server to answer it"
@@ -81,7 +96,7 @@ MYSQL_BIN="${MYSQL_BIN:-/c/Program Files/MySQL/MySQL Server 8.0/bin}"
 say "running deploy.sh --skip-install, end to end"
 PATH="$STUB:$MYSQL_BIN:$PATH" \
 APP_DIR="$APP" \
-APP_NAME="dai" \
+APP_NAME="dai-backend" \
 PORT="$PORT" \
 DAI_NODE_BIN="$(dirname "$(command -v node)")" \
 bash "$APP/deploy/deploy.sh" --skip-install

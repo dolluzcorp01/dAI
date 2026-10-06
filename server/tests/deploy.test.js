@@ -389,6 +389,25 @@ describe("production configuration guards", () => {
   test("refuses the mock model provider", () => {
     const err = checkProd({ ...goodEnough, MODEL_PRIMARY_PROVIDER: "mock" });
     assert.match(err || "", /mock/);
+    assert.match(err || "", /ALLOW_MOCK_MODEL=1/, "and says what to do if it is deliberate");
+  });
+
+  test("allows the mock provider when somebody says so on purpose", () => {
+    // The pilot's first deploy proves nginx, pm2, MySQL, Redis, sign in and the
+    // extension before a real key and a real bill are involved. The alternative
+    // was NODE_ENV=development, which switches off every other guard in this
+    // list, including the one that lets a local Kody password stand in for a
+    // dAdmin one. Working around one guard by disabling six is a bad trade.
+    const err = checkProd({ ...goodEnough, MODEL_PRIMARY_PROVIDER: "mock", ALLOW_MOCK_MODEL: "1" });
+    assert.equal(err, null, "a deliberate plumbing deploy has to be possible");
+  });
+
+  test("the opt-in only covers the model, not the rest", () => {
+    // It must not become a general "ignore the production guards" switch.
+    const err = checkProd({
+      ...goodEnough, MODEL_PRIMARY_PROVIDER: "mock", ALLOW_MOCK_MODEL: "1", REDIS_URL: "",
+    });
+    assert.match(err || "", /REDIS_URL/, "every other guard still applies");
   });
 
   test("refuses a memory mail or push transport", () => {
@@ -506,6 +525,19 @@ describe("deploying without installing on the box", () => {
       "a skipped install should still verify the tree satisfies package-lock.json");
     assert.match(block.slice(0, 700), /no node_modules to use/,
       "and say so plainly when there is nothing there at all");
+  });
+
+  test("the rollback does not install either", () => {
+    // The rollback used to run npm ci regardless. That is the 228 MB spike this
+    // arrangement exists to avoid, at the worst moment: a box already in
+    // trouble, with a deploy failing. It happened on the box with 234 MB free.
+    const rollback = sh.slice(sh.indexOf("Rolling the code back"));
+    assert.ok(rollback.length > 0, "there is no rollback path");
+    const install = rollback.indexOf("npm ci");
+    const guard = rollback.indexOf("SKIP_INSTALL");
+    assert.ok(guard > 0, "the rollback never looks at --skip-install");
+    assert.ok(guard < install || install === -1,
+      "the rollback installs before it checks whether it is allowed to");
   });
 
   test("an unknown option stops it before anything happens", () => {

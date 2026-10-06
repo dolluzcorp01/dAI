@@ -16,7 +16,7 @@
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/var/www/dolluzcorp.com/dai}"
-APP_NAME="${APP_NAME:-dai}"
+APP_NAME="${APP_NAME:-dai-backend}"   # every app on this box is <name>-backend
 PORT="${PORT:-4011}"
 HEALTH="http://127.0.0.1:${PORT}/health/ready"
 
@@ -131,7 +131,15 @@ pm2 logs "$APP_NAME" --lines 80 --nostream >&2 || true
 if [ -n "$PREVIOUS" ]; then
   echo "Rolling the code back to ${PREVIOUS}." >&2
   git -C "$APP_DIR" checkout --quiet "$PREVIOUS"
-  (cd "$APP_DIR/server" && (npm ci --omit=dev 2>/dev/null || npm install --omit=dev))
+  if [ -n "$SKIP_INSTALL" ]; then
+    # The rollback used to run npm ci regardless, which is the 228 MB spike this
+    # whole arrangement exists to avoid, at the worst possible moment: a box
+    # already in trouble, with a deploy failing. node_modules is left as it is.
+    echo "Not reinstalling: --skip-install. If the previous commit needs different" >&2
+    echo "dependencies, rebuild node_modules elsewhere and copy it over." >&2
+  else
+    (cd "$APP_DIR/server" && (npm ci --omit=dev 2>/dev/null || npm install --omit=dev))
+  fi
   pm2 reload "$APP_NAME" --update-env || pm2 start "$APP_DIR/ecosystem.config.js"
   echo "Code rolled back. THE MIGRATIONS DID NOT ROLL BACK: this project has no down" >&2
   echo "migrations, by design. If the new migration is what broke it, restore the dump" >&2

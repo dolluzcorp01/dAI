@@ -394,3 +394,17 @@ without --no-defaults:  Access denied for user 'kody'@'172.22.0.3' (using passwo
 The first attempt at that reproduction proved nothing and said so: the
 bind-mounted option file came out world-writable, MySQL ignored it, and both
 runs behaved identically. A check that cannot run is inconclusive, never a pass.
+
+## Three from the first real deploy attempt (2026-10-06)
+
+| File | Change | Why |
+|---|---|---|
+| `server/src/config.js` | `ALLOW_MOCK_MODEL=1` permits the mock provider in production, with a warning at every boot | The plan contradicted itself: step 1e said the first deploy would run `NODE_ENV=development` so the mock was allowed, and step 3 never said to change it, so the app refused to boot. Decided properly rather than patched: `NODE_ENV` stays `production`. Development mode would also switch off the Redis requirement, the storage and scanner checks, the mail and push transports, and the rule that a local Kody password cannot stand in for a dAdmin one. Working around one guard by disabling six is a bad trade. |
+| `deploy/deploy.sh` | the rollback honours `--skip-install` | It ran `npm ci` regardless, which is the 228 MB spike this whole arrangement exists to avoid, at the worst possible moment: a box already in trouble with a deploy failing. It happened on the box with 234 MB free. |
+| `ecosystem.config.js`, `deploy/deploy.sh` | the pm2 app is `dai-backend` | Every other app on that server is `<name>-backend`, and `pm2 list` is read by people who know that pattern. |
+| `deploy/dryrun.sh` | copies the whole working tree, not just `deploy/*.sh` | Found while testing the above: the config change was not in the run at all, so the deploy failed against the committed code while the new code sat untested a directory away. A half-faithful dry run is worth less than it appears. |
+
+Run end to end before pushing: `Reloading dai-backend`, the mock warning,
+`Kody API listening (production)`, readiness green, exit 0. And the rollback
+path was exercised by accident on the way, printing `Not reinstalling:
+--skip-install`.

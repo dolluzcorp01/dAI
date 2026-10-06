@@ -23,7 +23,9 @@
 module.exports = {
   apps: [
     {
-      name: "dai",
+      // dai-backend, not dai: every other app on this box is <name>-backend,
+      // and pm2 list is read by people who know that pattern.
+      name: "dai-backend",
       cwd: "/var/www/dolluzcorp.com/dai/server",
       script: "src/server.js",
 
