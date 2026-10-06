@@ -323,6 +323,18 @@ cd /var/www/dolluzcorp.com/dai
 ./deploy/deploy.sh --skip-install
 ```
 
+Before any change to `deploy/*.sh` is pushed, run it:
+
+```bash
+bash deploy/dryrun.sh
+```
+
+That runs `deploy.sh` end to end against a clone of the repository with the
+working tree's scripts copied in: real backup, real lockfile check, real
+migrate, real readiness poll against a real server, with only pm2 stubbed. It
+exists because three faults reached the server in three days and every one of
+them would have died on the first line of a single real run.
+
 The scripts carry the execute bit in git, so a fresh clone can run them. If a
 checkout ever loses it, `chmod +x deploy/*.sh`. Both scripts read **one** env
 file, `.env` at the repository root: the same one pm2 loads and the same one

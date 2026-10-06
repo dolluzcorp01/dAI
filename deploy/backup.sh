@@ -23,6 +23,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
+DEPLOY_DIR="$PWD"
 
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
@@ -34,6 +35,19 @@ MYSQL_IMAGE="${MYSQL_IMAGE:-mysql:8}"
 REQUIRED_TABLES=(users messages conversations schema_migrations)
 
 say() { echo "==> $*"; }
+
+# Does the gzipped dump contain this text?
+#
+# Deliberately not a quiet grep. A quiet grep exits the moment it matches, the
+# upstream gzip takes SIGPIPE, and with `set -o pipefail` the whole pipeline
+# reports failure. The test then reads backwards: a dump full of tables is
+# reported as having none. That is exactly what happened on the first end to end
+# run of this script, which called a complete 29 KB dump an unmigrated database.
+#
+# Counting reads to the end, so nothing upstream is ever signalled.
+contains() {
+  gzip -dc "$1" | grep -c -- "$2" >/dev/null 2>&1
+}
 die() { echo "backup failed: $*" >&2; exit 1; }
 
 # ---------------------------------------------------------------- verify
@@ -49,7 +63,7 @@ verify() {
   # An empty database dumps to well under the floor, so the floor only bites
   # once there is something to measure. The CREATE TABLE check below is what
   # separates "nothing in it yet" from "the dump went wrong".
-  if [ "$size" -lt "$MIN_BYTES" ] && gzip -dc "$file" 2>/dev/null | grep -q "CREATE TABLE"; then
+  if [ "$size" -lt "$MIN_BYTES" ] && contains "$file" "CREATE TABLE"; then
     die "dump is ${size} bytes, under the ${MIN_BYTES} minimum, yet it contains tables. Something truncated it."
   fi
 
@@ -58,14 +72,14 @@ verify() {
 
   # mysqldump writes this as its last line. Without it the dump stopped early,
   # which is exactly the case that still gunzips and still looks plausible.
-  gzip -dc "$file" | tail -5 | grep -q "Dump completed" \
+  gzip -dc "$file" | tail -5 | grep -c "Dump completed" >/dev/null 2>&1 \
     || die "the dump has no completion marker. It stopped partway."
 
   # A database with no tables at all is the first deploy, before migrations
   # have run. There is genuinely nothing to lose, and failing here would stop
   # the very deploy that creates the schema. The completion marker above has
   # already proved the dump ran, so this is "empty", not "broken".
-  if ! gzip -dc "$file" | grep -q "CREATE TABLE"; then
+  if ! contains "$file" "CREATE TABLE"; then
     say "$(basename "$file") holds no tables: this database has not been migrated yet."
     say "Nothing to back up. That is correct for a first deploy, not a failure."
     return 0
@@ -73,7 +87,7 @@ verify() {
 
   local missing=()
   for table in "${REQUIRED_TABLES[@]}"; do
-    gzip -dc "$file" | grep -q "CREATE TABLE \`${table}\`" || missing+=("$table")
+    contains "$file" "CREATE TABLE \`${table}\`" || missing+=("$table")
   done
   [ ${#missing[@]} -eq 0 ] \
     || die "these tables are not in the dump: ${missing[*]}. Wrong database, or the dump was filtered."
@@ -128,26 +142,44 @@ trap 'rm -f "$TMP"' EXIT
 
 # ---------------------------------------------------------------- dump
 
-# mysqldump runs in a throwaway container, so the droplet does not need a MySQL
-# client installed and the client version always matches the server.
+# mysqldump runs in a throwaway container when there is no client on the host,
+# so the droplet does not need one installed and the version always matches.
 #
-# --single-transaction  a consistent snapshot without locking writers out
-# --no-tablespaces      managed MySQL does not grant PROCESS, which this needs
+# --lock-tables         NOT --single-transaction, and this is deliberate. Since
+#                       mysqldump 8.0.32, --single-transaction issues FLUSH
+#                       TABLES, which needs the GLOBAL privilege RELOAD or
+#                       FLUSH_TABLES. The kody user has ALL PRIVILEGES on its own
+#                       database and nothing global, which is correct and is why
+#                       the first real backup failed with error 1227.
+#
+#                       --lock-tables locks every table in the database at once
+#                       for the length of the dump, so the dump is still
+#                       consistent. It blocks writers while it runs, which for a
+#                       database this size is well under a second and happens
+#                       immediately before a deploy restarts the app anyway.
+#
+#                       If this database ever grows to where that pause matters,
+#                       the fix is a privilege, not a flag:
+#                         GRANT RELOAD ON *.* TO 'kody'@'localhost';
+#                       then set BACKUP_SINGLE_TRANSACTION=1.
+# --no-tablespaces      dumping tablespace info needs PROCESS, also global
 # --set-gtid-purged=OFF the dump is for restoring here, not for seeding a replica
-# --password on stdin   so it never appears in `ps` or in the shell history
+# --password via MYSQL_PWD  so it never appears in `ps` or in shell history
+CONSISTENCY="--lock-tables"
+[ "${BACKUP_SINGLE_TRANSACTION:-}" = "1" ] && CONSISTENCY="--single-transaction"
 say "dumping ${DB_NAME} from ${DB_HOST}:${DB_PORT}"
 
 if command -v mysqldump >/dev/null 2>&1; then
   MYSQL_PWD="$DB_PASSWORD" mysqldump \
     --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" \
-    --single-transaction --quick --routines --triggers --events \
+    $CONSISTENCY --quick --routines --triggers --events \
     --no-tablespaces --set-gtid-purged=OFF \
     "$DB_NAME" | gzip -9 > "$TMP"
 else
   docker run --rm -i -e MYSQL_PWD="$DB_PASSWORD" "$MYSQL_IMAGE" \
     mysqldump \
     --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" \
-    --single-transaction --quick --routines --triggers --events \
+    $CONSISTENCY --quick --routines --triggers --events \
     --no-tablespaces --set-gtid-purged=OFF \
     "$DB_NAME" | gzip -9 > "$TMP"
 fi

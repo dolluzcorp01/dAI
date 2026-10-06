@@ -352,3 +352,26 @@ now.
 
 Both failures stopped cleanly with "nothing was changed", which is the only
 good thing to say about them.
+
+## Running the deploy before pushing it (2026-10-06)
+
+Three faults reached the server in three days, all in the same two files, and
+every one of them would have died on the first line of a single real run:
+
+1. the scripts shipped without the execute bit
+2. `backup.sh` read `.env.production`, which nothing creates
+3. `backup.sh` used `DEPLOY_DIR`, which only `deploy.sh` defines
+
+Shoban found all three by running them. The honest reading is that reading a
+shell script is not running it, and I had been reading.
+
+| File | Change | Why |
+|---|---|---|
+| `deploy/backup.sh` | `DEPLOY_DIR="$PWD"` after the `cd` | The third fault. `set -u` caught it, which is right, and it means the change was never executed before it was pushed. |
+| `deploy/backup.sh` | `--lock-tables` rather than `--single-transaction` | The fourth fault, found by the first real run. Since mysqldump 8.0.32, `--single-transaction` issues `FLUSH TABLES`, which needs the GLOBAL privilege `RELOAD` or `FLUSH_TABLES`. The `kody` user has `ALL PRIVILEGES` on its own database and nothing global, which is correct, so every backup would have failed on the box with error 1227. `--lock-tables` locks the whole database at once, so the dump is still consistent, and it needs no privilege the user does not already have. `BACKUP_SINGLE_TRANSACTION=1` opts back in where the privilege exists. |
+| `deploy/backup.sh` | a `contains()` helper, replacing four quiet greps | The fifth, found in the same run. A quiet grep exits on first match, the upstream `gzip` takes SIGPIPE, and with `set -o pipefail` the pipeline reports failure. Every one of those tests read backwards: a complete 29 KB dump of a fully migrated database was reported as having no tables. The same trap sat in the required-tables check, where it would have reported tables missing when they were present, and failed a good backup. |
+| `deploy/dryrun.sh` | new | Runs `deploy.sh` end to end against a clone, with the working tree's scripts copied in. Real backup, real `npm ls`, real migrate, real readiness poll against a real server; the only stub is pm2, and it starts the actual application. |
+
+Proven, not asserted: the full path exits 0 with `verified ... all 4 required
+tables present`, and a genuinely empty database, in a throwaway MySQL
+container, reports `nothing to back up` and exits 0.
