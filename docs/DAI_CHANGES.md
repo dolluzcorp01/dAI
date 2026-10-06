@@ -304,3 +304,25 @@ started with the repository's `.env`. The suite passes the values as the child's
 environment instead.
 
 | `deploy/deploy.sh` | `--skip-install`, and `DAI_SKIP_INSTALL=1` | `npm ci` peaks at 228 MB against 84 MB for the running app, on a box with 1 GB shared between thirteen apps, so `node_modules` is built elsewhere and copied. Skipping the install does not skip checking it: `npm ls --omit=dev` must still say the tree satisfies the lockfile. An unknown flag is now refused before anything happens, rather than ignored. |
+
+## A 13 MB tarball got committed (2026-10-05)
+
+Found by Shoban, when `git pull` on the server tried to overwrite the
+`node_modules` he had just copied there.
+
+| File | Change | Why |
+|---|---|---|
+| `server/node_modules.tgz`, `server/node_modules.sha256` | untracked | Build artefacts from the install-elsewhere route. 13.2 MB and 653 KB, committed in 7d1fef1. |
+| `.gitignore` | both, plus `*.tgz` and `*.sha256` | So the next sweep cannot take them. |
+| `server/tests/repo-hygiene.test.js` | new | No tracked file over 1 MB, no archives or keys or `.env` files, `node_modules` not tracked in any form, and `.gitignore` actually covering the three that would hurt most. |
+
+**How it happened, which is the part worth fixing:** every commit in this
+project has been made with `git add -A`, which stages the whole working tree. It
+was fine while the only things in the tree were source files. The moment the
+runbook told someone to build a 13 MB archive inside `server/`, the next commit
+took it. Staging explicit paths is the fix; the test above is what catches it
+when the habit slips.
+
+Nothing secret was ever tracked. `.env`, `deploy/.env.production` and
+`extension/key.pem` were checked and are absent from the index, which is what
+the `.gitignore` entries added for them were for.

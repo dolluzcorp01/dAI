@@ -13,3 +13,13 @@ build/
 # update as us.
 extension/key.pem
 extension/*.pem
+
+# Build artefacts from the install-elsewhere route (docs/16-pilot-runbook.md).
+# node_modules is built on a machine that can afford npm ci, archived with a
+# checksum manifest and copied to the server. Neither belongs in the repository,
+# and a 13 MB blob was committed on 2026-10-05 because a commit staged the whole
+# working tree.
+server/node_modules.tgz
+server/node_modules.sha256
+*.tgz
+*.sha256
