@@ -408,3 +408,17 @@ Run end to end before pushing: `Reloading dai-backend`, the mock warning,
 `Kody API listening (production)`, readiness green, exit 0. And the rollback
 path was exercised by accident on the way, printing `Not reinstalling:
 --skip-install`.
+
+## The rollback left the repository detached (2026-10-06)
+
+| File | Change | Why |
+|---|---|---|
+| `deploy/deploy.sh` | refuses to deploy from a detached HEAD, and the rollback returns to the branch | The worst fault of the set, because it was silent. `git checkout <sha>` detaches, `git pull` then prints "You are not currently on a branch" and does nothing, and the NEXT deploy runs the old code while every step reports success. Shoban hit exactly that on the box. The rollback now does `checkout $BRANCH` then `reset --hard $PREVIOUS`, so the tree is the old code and the repository is still on a branch. |
+| `deploy/deploy.sh` | says which commit it is deploying, at the start and the end | So "it ran yesterday's build and said it worked" is visible in the output rather than worked out two deploys later. |
+
+Proven against a genuinely detached checkout before pushing: the guard refuses,
+names the commit, and prints the command to get back on the branch.
+
+One mutation did not fail at first: turning the guard off left the words
+"detached HEAD" in the echo lines, which a test searching for that text still
+matched. The test asserts on the condition now.

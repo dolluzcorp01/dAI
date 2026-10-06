@@ -540,6 +540,38 @@ describe("deploying without installing on the box", () => {
       "the rollback installs before it checks whether it is allowed to");
   });
 
+  test("it refuses to deploy from a detached HEAD", () => {
+    // The worst failure of the set, because it is silent. git pull does nothing
+    // on a detached HEAD, so the next deploy runs the OLD code while every step
+    // reports success. It happened on the box because this script's own
+    // rollback left the repository detached.
+    // The CONDITION, not the message. Looking for the words "detached HEAD"
+    // passes against a script whose guard has been turned off, because the
+    // explanation is still sitting there in the echo lines.
+    const guard = sh.search(/^if \[ -z "\$BRANCH" \]; then$/m);
+    const backup = sh.indexOf("backup.sh");
+    assert.ok(guard > 0, "nothing tests whether the checkout is on a branch");
+    assert.ok(guard < backup, "it tests after it has started doing things");
+    assert.match(sh, /symbolic-ref --short -q HEAD/, "that is how you ask");
+    assert.match(sh, /die "refusing to deploy from a detached HEAD"/);
+  });
+
+  test("the rollback returns to the branch rather than detaching", () => {
+    const rollback = sh.slice(sh.indexOf("Rolling the code back"));
+    assert.match(rollback, /checkout --quiet "\$BRANCH"/,
+      "git checkout <sha> is what caused this");
+    assert.match(rollback, /reset --hard --quiet "\$PREVIOUS"/);
+    assert.ok(!/checkout --quiet "\$PREVIOUS"/.test(rollback),
+      "checking out a bare commit leaves the repository detached");
+  });
+
+  test("it says which commit it is deploying, at the start and the end", () => {
+    // So "it ran the old code and said it worked" is visible in the output
+    // rather than something you work out two deploys later.
+    assert.match(sh, /say "Deploying \$\{PREVIOUS:0:12\} on \$\{BRANCH\}"/);
+    assert.match(sh, /say "Deployed \$\{PREVIOUS:0:12\} on \$\{BRANCH\}/);
+  });
+
   test("an unknown option stops it before anything happens", () => {
     const parse = sh.indexOf("unknown option");
     const backup = sh.indexOf("backup.sh");

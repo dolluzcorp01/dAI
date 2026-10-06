@@ -62,8 +62,30 @@ say "Using node ${NODE_VERSION} from $(command -v node)"
 [ -d "$APP_DIR" ] || die "no app directory at $APP_DIR"
 [ -f "$APP_DIR/.env" ] || die "no $APP_DIR/.env. Copy .env.example and fill it in."
 
-# The commit we are on now, so a rollback has somewhere to go back to.
+# The branch and the commit we are on now, so a rollback has somewhere to go
+# back to AND something to go back on.
+#
+# A detached HEAD is refused outright. It is not an inconvenience, it is the
+# state in which `git pull` prints "You are not currently on a branch" and does
+# nothing, so the next deploy runs the OLD code while every step of this script
+# reports success. That is how you ship yesterday's build believing it is
+# today's, and it happened on the box on 2026-10-06 because this script's own
+# rollback left the repository detached.
+BRANCH="$(git -C "$APP_DIR" symbolic-ref --short -q HEAD || echo "")"
 PREVIOUS="$(git -C "$APP_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+
+if [ -z "$BRANCH" ]; then
+  echo "This checkout is on a detached HEAD at ${PREVIOUS:0:12}." >&2
+  echo "git pull does nothing in that state, so a deploy from here would run" >&2
+  echo "whatever is checked out while reporting success. Get back on the branch" >&2
+  echo "first, deciding deliberately which code you want:" >&2
+  echo "" >&2
+  echo "  git -C $APP_DIR checkout main      # then git pull for the latest" >&2
+  echo "" >&2
+  die "refusing to deploy from a detached HEAD"
+fi
+
+say "Deploying ${PREVIOUS:0:12} on ${BRANCH}"
 
 # ---------------------------------------------------------------- backup
 
@@ -119,7 +141,7 @@ done
 if [ -n "$ready" ]; then
   curl -fsS "$HEALTH"
   echo
-  say "Deployed. pm2 id $(pm2 pid "$APP_NAME" 2>/dev/null || echo '?')"
+  say "Deployed ${PREVIOUS:0:12} on ${BRANCH}. pm2 id $(pm2 pid "$APP_NAME" 2>/dev/null || echo '?')"
   exit 0
 fi
 
@@ -129,8 +151,11 @@ echo "Readiness never came up. Last 80 lines:" >&2
 pm2 logs "$APP_NAME" --lines 80 --nostream >&2 || true
 
 if [ -n "$PREVIOUS" ]; then
-  echo "Rolling the code back to ${PREVIOUS}." >&2
-  git -C "$APP_DIR" checkout --quiet "$PREVIOUS"
+  echo "Rolling the code back to ${PREVIOUS} on ${BRANCH}." >&2
+  # On the branch, not detached. `git checkout <sha>` leaves the repository in a
+  # state where the next git pull silently does nothing.
+  git -C "$APP_DIR" checkout --quiet "$BRANCH"
+  git -C "$APP_DIR" reset --hard --quiet "$PREVIOUS"
   if [ -n "$SKIP_INSTALL" ]; then
     # The rollback used to run npm ci regardless, which is the 228 MB spike this
     # whole arrangement exists to avoid, at the worst possible moment: a box
@@ -141,6 +166,10 @@ if [ -n "$PREVIOUS" ]; then
     (cd "$APP_DIR/server" && (npm ci --omit=dev 2>/dev/null || npm install --omit=dev))
   fi
   pm2 reload "$APP_NAME" --update-env || pm2 start "$APP_DIR/ecosystem.config.js"
+  echo "" >&2
+  echo "${BRANCH} now points at ${PREVIOUS:0:12}, so you are on a branch and git pull" >&2
+  echo "still works. The next pull will bring the failing commit back: fix it first." >&2
+  echo "" >&2
   echo "Code rolled back. THE MIGRATIONS DID NOT ROLL BACK: this project has no down" >&2
   echo "migrations, by design. If the new migration is what broke it, restore the dump" >&2
   echo "taken at the start of this run before doing anything else." >&2
