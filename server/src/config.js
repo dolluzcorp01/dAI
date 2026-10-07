@@ -62,8 +62,18 @@ const config = {
     // A dedicated random secret shared only with dAdmin's DAI_SHARED_JWT_SECRET,
     // never dAdmin's own JWT_SECRET. Used by the service-token middleware in 1.2.
     sharedJwtSecret: optional("DADMIN_SHARED_JWT_SECRET", ""),
-    // Where to send someone who forgot their password. The password belongs to dAdmin.
-    resetUrl: optional("DADMIN_RESET_URL", ""),
+    // dAI: where to send somebody who has forgotten their password.
+    //
+    // Inside D, not dAdmin. The password belongs to dadmin.employee either way,
+    // but only Admin and Sub Admin can sign in to the dAdmin console, and Kody
+    // is for everyone: a User-level AR caller sent there lands on a page that
+    // refuses them. Inside D is the portal every employee can use, and its
+    // Forgot password runs a five minute email OTP against the same
+    // dadmin.employee row.
+    //
+    // The old name is still read, so a box that has not had its .env updated
+    // keeps working rather than silently losing the link.
+    resetUrl: optional("PASSWORD_RESET_URL", "") || optional("DADMIN_RESET_URL", ""),
   },
 
   // Extension ids allowed to receive the auth handoff (chromiumapp.org callback).

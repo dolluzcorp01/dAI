@@ -479,3 +479,21 @@ inside Chrome's own flow again fails two tests.
 **Not verified here:** no browser has run this. The routing and the recovery are
 proven by tests; that Chrome stops reporting the cancellation is Shoban's to
 confirm, by watching the popup through the first five seconds as before.
+
+## Forgot password pointed at a door most people cannot open (2026-10-07)
+
+| File | Change | Why |
+|---|---|---|
+| `server/src/config.js` | `PASSWORD_RESET_URL`, falling back to `DADMIN_RESET_URL` | The link went to the dAdmin console, where only Admin and Sub Admin can sign in. Kody is for everyone, so a User-level AR caller who forgot their password landed on a page that refuses them. It points at Inside D now, the portal every employee can use. The old variable is still read, because renaming a setting that is already on a server is a way to break it quietly. |
+| `server/src/routes/auth.routes.js`, the sign in page | the wording says the Dolluz portal, not dAdmin | |
+
+Checked before pointing at it, rather than assumed: Inside D's login is at
+`/login` (lowercase), and its Forgot password runs a five minute email OTP
+against the same `dadmin.employee` row, with no access-level condition. So the
+people this link exists for can actually use it.
+
+On the box, update `.env`:
+
+```
+PASSWORD_RESET_URL=https://inside.dolluzcorp.com/login
+```

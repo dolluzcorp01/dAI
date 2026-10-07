@@ -255,10 +255,10 @@ $("forgot").addEventListener("click", async (event) => {
       link.href = body.resetUrl;
       link.target = "_blank";
       link.rel = "noreferrer noopener";
-      link.textContent = "Open dAdmin";
+      link.textContent = "Open the Dolluz portal";
       box.appendChild(link);
     }
   } catch (_) {
-    fail("Your Kody password is your Dolluz sign-in password. Reset it in dAdmin.");
+    fail("Your Kody password is your Dolluz sign-in password. Reset it on the Dolluz portal.");
   }
 });

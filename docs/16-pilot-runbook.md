@@ -230,7 +230,7 @@ DB_PASSWORD=<the one you just set>
 JWT_ACCESS_SECRET=<openssl rand -base64 48>
 JWT_REFRESH_SECRET=<openssl rand -base64 48>
 DADMIN_SHARED_JWT_SECRET=<openssl rand -base64 48, shared with dAdmin>
-DADMIN_RESET_URL=https://dadmin.dolluzcorp.com/Login
+PASSWORD_RESET_URL=https://inside.dolluzcorp.com/login
 EXTENSION_IDS=ikamkodfpkklimdldhfpnhmmlapdjpmn
 
 REDIS_URL=redis://127.0.0.1:6379/3

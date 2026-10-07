@@ -388,7 +388,17 @@ describe("refresh re-checks dAdmin", () => {
 });
 
 describe("forgot password", () => {
-  test("points at dAdmin and says the same thing for any address", async () => {
+  test("the new config name is read, and the old one still works", async () => {
+    // Renaming a setting that is already on a server is a way to break it
+    // quietly. PASSWORD_RESET_URL is the name now, DADMIN_RESET_URL is still
+    // read, and a box whose .env has not been updated keeps its link.
+    const src = require("node:fs").readFileSync(
+      require("node:path").join(__dirname, "..", "src", "config.js"), "utf8");
+    assert.match(src, /optional\("PASSWORD_RESET_URL", ""\) \|\| optional\("DADMIN_RESET_URL", ""\)/,
+      "the new name should win, with the old one as the fallback");
+  });
+
+  test("points at the portal and says the same thing for any address", async () => {
     const known = employee();
     const a = await api("POST", "/api/auth/forgot-password", { email: known.email });
     const b = await api("POST", "/api/auth/forgot-password", { email: `nobody-${stamp}@example.com` });
@@ -396,7 +406,12 @@ describe("forgot password", () => {
     assert.equal(a.status, 200);
     assert.equal(b.status, 200);
     assert.deepEqual(a.body, b.body, "no way to tell whether an account exists");
-    assert.match(a.body.message, /dAdmin/, "it names where the password lives");
+    // The portal, NOT the dAdmin console. Only Admin and Sub Admin can sign in
+    // to dAdmin, and Kody is for everyone: a User-level caller sent there lands
+    // on a page that refuses them.
+    assert.match(a.body.message, /portal/, "it should name somewhere every employee can use");
+    assert.ok(!/dAdmin/.test(a.body.message),
+      "the dAdmin console turns away exactly the people most likely to need this");
     assert.equal(a.body.resetUrl, config.dadmin.resetUrl || null, "it hands back the configured page");
     if (config.dadmin.resetUrl) {
       assert.match(a.body.message, /Forgot password/,
