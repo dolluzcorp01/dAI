@@ -497,3 +497,32 @@ On the box, update `.env`:
 ```
 PASSWORD_RESET_URL=https://inside.dolluzcorp.com/login
 ```
+
+## Single sign-on from Inside D, 2026-10-07 (docs/17-portal-sso.md)
+
+Designed first, answered five questions, then built dAI's half only. Inside D is a separate
+repository and its half is specified in docs/17-portal-sso.md section 5, not written here.
+
+The shape is a short-lived handoff code, NOT introspection of the portal cookie. The
+proposal was that dAI's sign in page send Inside D the raw dolluzcorp_token and ask who it
+belongs to. That was rejected because it would put a live portal credential, the key to
+every dApp in the suite, through dAI's page and process: an XSS there or one stray error
+object carrying a request body would turn a dAI incident into a suite-wide one, which is the
+same risk that keeps dAI out of dAdmin's shared JWT_SECRET scheme.
+
+| File | Change | Why |
+|---|---|---|
+| server/migrations/013_portal_sso.sql | NEW | origin on auth_codes and sessions. On the SESSION row, not just the code, because refresh rotation INSERTs a new row every fifteen minutes: without carrying the word forward a portal session is issued for 8 hours and promoted to 30 days by its own first refresh. |
+| server/src/services/portal.service.js | NEW | The exchange with Inside D and nothing else. Reads emp_id from the response and drops every other field, so a later Inside D cannot start deciding who somebody is in Kody. 5 second timeout, then the password form. |
+| server/src/services/dadmin.service.js | `// dAI:` signInWithEmpId | Sign in on an emp_id somebody else vouched for. Goes through the SAME accessProblem() as signIn, so app_dAI is enforced on both paths. Does not fall through to a local Kody password in any environment. |
+| server/src/services/auth.service.js | resolveUser takes an object | Two ways to prove who you are, one place that decides whether you may use Kody. issueSession and refresh carry origin; refresh distinguishes portal_session_ended from refresh_expired. |
+| server/src/lib/tokens.js | sessionExpiry(origin) | 8 hours for portal, REFRESH_TOKEN_DAYS for password, and the shorter of the two for anything unrecognised so a typo cannot lengthen a session. |
+| server/src/routes/auth.routes.js | two routes | GET /portal/config (nothing secret) and POST /portal/callback. The authorize route still never reads an emp_id from a request body. |
+| server/public/extension/authorize/ | both legs | prompt=none so Inside D answers without showing its own login and there is no loop. sessionStorage holds what the extension asked for, because Inside D gets one fixed redirect_uri with no query. Every failure lands on the password form with a line saying why. |
+| server/src/config.js | portal block, portalEnabled(), four guards | Inert unless all five PORTAL_* are set. Refuses to boot on four of five, on a client secret that is a signing secret, on one under 32 characters, and on a non-https portal URL in production. |
+| server/scripts/check-env.js | portal checks, and a fix | Also fixes a fault introduced in c241629: it still required DADMIN_RESET_URL, so a box configured with the new PASSWORD_RESET_URL would have been told it was missing. |
+
+Not built, on purpose: nothing propagates a portal logout to a Kody session. The honest
+answer was to make a portal sign-in last a working day instead of 30 days and SAY so, on the
+handoff screen and again when it ends, rather than let somebody find out by being signed out
+in the evening and assume Kody is broken.

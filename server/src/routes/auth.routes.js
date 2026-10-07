@@ -84,6 +84,74 @@ router.post("/logout", async (req, res) => {
   } catch (err) { handle(res, err); }
 });
 
+/* ---------------- single sign-on from Inside D (docs/17-portal-sso.md) ----------------
+ *
+ * Two endpoints, and between them the portal token never appears. The sign in
+ * page asks /portal/config where to send somebody, Inside D answers on its own
+ * origin from its own cookie, and /portal/callback swaps the one-time code it
+ * sends back for an emp_id, server to server.
+ *
+ * Both are INERT until PORTAL_* is configured. Until then /portal/config says
+ * enabled:false, the page never leaves this origin, and the password form is
+ * the only way in: which is how Phase 1 works today and must keep working while
+ * the Inside D half is built in another repository.
+ */
+
+/* GET /api/auth/portal/config
+   Where to send somebody, and nothing secret. No authentication, because the
+   answer is the same for everybody and the sign in page has nobody signed in
+   yet by definition. */
+router.get("/portal/config", (req, res) => {
+  res.json(svc.portal.pageConfig());
+});
+
+/* POST /api/auth/portal/callback
+   The return leg. Body: the one-time code Inside D redirected back with, plus
+   the state and callback the EXTENSION originally asked for, because the code
+   this mints has to be bound to those exactly as the password path binds them.
+
+   The portal state, which guards against somebody else's code being pushed
+   through this page, is checked by the page against its own sessionStorage
+   before it ever posts here. It cannot be checked a second time on the server
+   without the server storing pending requests, and what it protects against is
+   a code being swapped for one belonging to the attacker's own portal session,
+   which wins them a Kody session as themselves. docs/17-portal-sso.md
+   "What the portal state does and does not cover". */
+router.post("/portal/callback", loginLimiter, async (req, res) => {
+  try {
+    if (!svc.portal.enabled()) {
+      return res.status(503).json({
+        error: "portal_disabled",
+        message: "Portal sign-on is not configured. Use your password.",
+      });
+    }
+    const { portal_code: portalCode, state, redirect_uri: redirectUri, surface } = req.body || {};
+    if (!portalCode) {
+      return res.status(400).json({ error: "missing_portal_code", message: "No portal code was supplied." });
+    }
+
+    // Step 1: ask Inside D who this is. The answer is an emp_id and nothing
+    // else; see portal.service.js.
+    const { empId } = await svc.portal.exchange(portalCode);
+
+    // Step 2: the ordinary authorize path, with the emp_id in place of a
+    // password. dadmin still decides whether this person may use Kody, so
+    // app_dAI is enforced here exactly as it is for a password.
+    const out = await svc.authorize(
+      { portalEmpId: empId, state, redirectUri, surface: surface || "extension" },
+      ctxOf(req)
+    );
+    // sessionHours so the page can SAY how long this lasts on the way in, not
+    // leave somebody to find out by being signed out (docs/17-portal-sso.md).
+    res.json({ ...out, sessionHours: config.portal.sessionHours });
+  } catch (err) {
+    if (err instanceof svc.portal.PortalError) {
+      return res.status(err.status).json({ error: err.code, message: err.message });
+    }
+    handle(res, err);
+  }
+});
+
 /* POST /api/auth/forgot-password
    dAI: the password belongs to dadmin.employee, so dAI never resets one
    (docs/PHASES.md 1.1). It points at Inside D rather than the dAdmin console,

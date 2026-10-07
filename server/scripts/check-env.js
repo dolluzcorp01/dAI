@@ -77,10 +77,27 @@ if (!expectedPort && template.get("PORT") && String(env.PORT) === template.get("
   note(`PORT is still the template's ${env.PORT}. Pass --port <what nginx proxies> to check it properly.`);
 }
 
-for (const key of ["PUBLIC_URL", "WEB_URL", "DADMIN_RESET_URL"]) {
+for (const key of ["PUBLIC_URL", "WEB_URL"]) {
   if (!present(key)) { fail(key, "is empty."); continue; }
   if (isProd && looksLocal(env[key])) {
     fail(key, `points at ${env[key]}, which nobody outside this box can reach.`);
+  }
+}
+
+// Where "forgot password" sends people. PASSWORD_RESET_URL is the name now;
+// DADMIN_RESET_URL is still read by config.js so a box that has not been
+// updated keeps its link, and either one counts as set here.
+const resetKey = present("PASSWORD_RESET_URL") ? "PASSWORD_RESET_URL"
+  : (present("DADMIN_RESET_URL") ? "DADMIN_RESET_URL" : null);
+if (!resetKey) {
+  fail("PASSWORD_RESET_URL", "is empty, so Forgot password has nowhere to point.");
+} else {
+  if (resetKey === "DADMIN_RESET_URL") {
+    note("DADMIN_RESET_URL is the old name and still works. Rename it to "
+      + "PASSWORD_RESET_URL: it points at the Dolluz portal, not the dAdmin console.");
+  }
+  if (isProd && looksLocal(env[resetKey])) {
+    fail(resetKey, `points at ${env[resetKey]}, which nobody outside this box can reach.`);
   }
 }
 
@@ -114,6 +131,47 @@ if (!present("EXTENSION_IDS")) {
 } else {
   for (const id of env.EXTENSION_IDS.split(",").map(s => s.trim()).filter(Boolean)) {
     if (!/^[a-p]{32}$/.test(id)) fail("EXTENSION_IDS", `"${id}" is not a Chrome extension id.`);
+  }
+}
+
+/* ---------------- single sign-on from Inside D (docs/17-portal-sso.md) ---------------- */
+
+const PORTAL_KEYS = ["PORTAL_CLIENT_ID", "PORTAL_CLIENT_SECRET", "PORTAL_AUTHORIZE_URL",
+                     "PORTAL_TOKEN_URL", "PORTAL_REDIRECT_URI"];
+const portalSet = PORTAL_KEYS.filter(present);
+
+if (portalSet.length === 0) {
+  note("portal sign-on is off, so the Kody sign in page asks for a password. "
+    + "That is correct until Inside D has built its half.");
+} else {
+  // config.js refuses to boot on a half configured handoff. Saying it here too
+  // means finding out before pm2 does.
+  const portalMissing = PORTAL_KEYS.filter(k => !present(k));
+  if (portalMissing.length > 0) {
+    fail("PORTAL_*", `half configured: missing ${portalMissing.join(", ")}. `
+      + "The app will refuse to start. Set all five, or none.");
+  }
+  if (present("PORTAL_CLIENT_SECRET")) {
+    const secret = env.PORTAL_CLIENT_SECRET;
+    if (secret.length < 32) {
+      fail("PORTAL_CLIENT_SECRET", `is ${secret.length} characters. Use: openssl rand -base64 48`);
+    }
+    for (const other of ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "DADMIN_SHARED_JWT_SECRET"]) {
+      if (env[other] && secret === env[other]) {
+        fail("PORTAL_CLIENT_SECRET", `is the same string as ${other}. It authenticates dAI to `
+          + "one endpoint at Inside D and signs nothing, so it must be its own value.");
+      }
+    }
+  }
+  for (const key of ["PORTAL_AUTHORIZE_URL", "PORTAL_TOKEN_URL", "PORTAL_REDIRECT_URI"]) {
+    if (isProd && present(key) && !/^https:\/\//.test(env[key])) {
+      fail(key, `is ${env[key]}. The app refuses a non-https portal URL in production.`);
+    }
+  }
+  if (present("PORTAL_REDIRECT_URI") && present("PUBLIC_URL")
+      && !env.PORTAL_REDIRECT_URI.startsWith(env.PUBLIC_URL)) {
+    fail("PORTAL_REDIRECT_URI", `is ${env.PORTAL_REDIRECT_URI}, which is not on PUBLIC_URL `
+      + `(${env.PUBLIC_URL}). Inside D would send people somewhere this app does not serve.`);
   }
 }
 

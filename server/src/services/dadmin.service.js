@@ -201,6 +201,51 @@ async function signIn(email, password) {
 }
 
 /**
+ * dAI: sign in on the strength of an emp_id somebody else vouched for.
+ *
+ * This is the portal path (docs/17-portal-sso.md). Inside D has already proved
+ * who the person is, from its own session cookie, and tells dAI one thing: the
+ * emp_id. There is no password here and there is no portal token here, by
+ * design: dAI never holds a credential that works anywhere else.
+ *
+ * What it does NOT skip is the part that decides whether this person may use
+ * Kody. signIn checks the password and then accessProblem; this checks
+ * accessProblem and nothing else is missing from it. Portal access is not Kody
+ * access: an employee with a perfectly good portal session and app_dAI = 0 is
+ * refused here exactly as they are refused with the right password.
+ *
+ * It also does not fall through to a local Kody password the way signIn does,
+ * in any environment. A vouched emp_id that dadmin has never heard of is a
+ * fault at Inside D or a forged exchange, not a development convenience.
+ */
+async function signInWithEmpId(empId) {
+  const clean = String(empId || "").trim();
+  if (!clean) {
+    throw new DadminError(400, "missing_emp_id", "No employee was identified.");
+  }
+  const employee = await module.exports.findEmployeeByEmpId(clean);
+
+  // The same answer whether dadmin has no such employee or has one who may not
+  // use dAI. The caller is a server, not a person typing, so there is nothing
+  // to be gained by telling it which, and an emp_id oracle is worth having
+  // less than an unhelpful error message costs.
+  const problem = accessProblem(employee);
+  if (problem) {
+    throw new DadminError(403, "dai_not_enabled",
+      "This account does not have access to dAI. Ask an administrator to enable it in dAdmin.");
+  }
+
+  const synced = await module.exports.syncUser(employee);
+  return {
+    id: synced.userId,
+    empId: employee.empId,
+    email: String(employee.email || "").trim(),
+    fullName: fullNameOf(employee),
+    created: synced.created,
+  };
+}
+
+/**
  * Re-check on refresh, so turning someone off in dAdmin ends their access
  * rather than waiting for a 30 day refresh token to expire.
  * Returns null when the employee still has access, or a reason when not.
@@ -214,5 +259,6 @@ async function accessRevoked(empId) {
 module.exports = {
   DadminError, EMPLOYEE_COLUMNS,
   findEmployeeByEmail, findEmployeeByEmpId, verifyEmployeePassword,
-  accessProblem, roleForAccessLevel, initialsFor, syncUser, signIn, accessRevoked,
+  accessProblem, roleForAccessLevel, initialsFor, syncUser, signIn, signInWithEmpId,
+  accessRevoked,
 };

@@ -23,7 +23,7 @@ const GOOD = {
   PORT: "4011",
   PUBLIC_URL: "https://dai.dolluzcorp.com",
   WEB_URL: "https://dai.dolluzcorp.com",
-  DADMIN_RESET_URL: "https://dadmin.dolluzcorp.com/Login",
+  PASSWORD_RESET_URL: "https://inside.dolluzcorp.com/login",
   DB_PASSWORD: "a-real-password",
   JWT_ACCESS_SECRET: "A".repeat(44),
   JWT_REFRESH_SECRET: "B".repeat(44),
@@ -173,7 +173,93 @@ describe("what it reports without failing", () => {
   });
 
   test("it names keys the template has that this file does not", () => {
-    const r = check({ DADMIN_RESET_URL: null });
-    assert.match(r.out, /DADMIN_RESET_URL/, "a key dropped entirely should be reported");
+    // MAIL_FROM, because the template ships it and the checker does not demand
+    // it: a key that is merely absent should appear in the note and nowhere
+    // else. It used to be DADMIN_RESET_URL, which the template no longer ships
+    // uncommented, so the test was passing on a key that was not there either.
+    const r = check({ MAIL_FROM: null });
+    assert.match(r.out, /not set at all[\s\S]*MAIL_FROM/, "a key dropped entirely should be reported");
+  });
+
+  test("the renamed reset URL is accepted under either name, and nagged under the old one", () => {
+    // config.js reads PASSWORD_RESET_URL and falls back to DADMIN_RESET_URL, so
+    // a box that has not been updated keeps its link. The checker used to
+    // require the OLD name, which would have reported a correctly configured
+    // box as missing it.
+    const current = check();
+    assert.equal(current.code, 0, current.out);
+
+    const old = check({ PASSWORD_RESET_URL: null, DADMIN_RESET_URL: "https://inside.dolluzcorp.com/login" });
+    assert.equal(old.code, 0, old.out);
+    assert.match(old.out, /DADMIN_RESET_URL is the old name/);
+    assert.match(old.out, /Rename it/);
+
+    const neither = check({ PASSWORD_RESET_URL: null });
+    assert.equal(neither.code, 1);
+    assert.match(neither.out, /PASSWORD_RESET_URL/);
+  });
+});
+
+describe("single sign-on from Inside D (docs/17-portal-sso.md)", () => {
+  const PORTAL = {
+    PORTAL_CLIENT_ID: "dai",
+    PORTAL_CLIENT_SECRET: "D".repeat(44),
+    PORTAL_AUTHORIZE_URL: "https://inside.dolluzcorp.com/authorize",
+    PORTAL_TOKEN_URL: "https://inside.dolluzcorp.com/oauth/token",
+    PORTAL_REDIRECT_URI: "https://dai.dolluzcorp.com/extension/authorize",
+  };
+
+  test("none of it set is reported as off, not as broken", () => {
+    // Which is how production is configured today. The Inside D half does not
+    // exist, and a checker that called that a fault would train people to
+    // ignore it.
+    const r = check();
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /portal sign-on is off/);
+    assert.match(r.out, /until Inside D has built its half/);
+  });
+
+  test("all five set passes", () => {
+    const r = check(PORTAL);
+    assert.equal(r.code, 0, r.out);
+  });
+
+  test("four of five is caught here, before pm2 restarts into a crash loop", () => {
+    for (const missing of Object.keys(PORTAL)) {
+      const r = check({ ...PORTAL, [missing]: null });
+      assert.equal(r.code, 1, `${missing} missing passed: ${r.out}`);
+      assert.match(r.out, /half configured/);
+      assert.match(r.out, new RegExp(missing));
+    }
+  });
+
+  test("the client secret may not be a signing secret", () => {
+    for (const other of ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "DADMIN_SHARED_JWT_SECRET"]) {
+      const r = check({ ...PORTAL, PORTAL_CLIENT_SECRET: GOOD[other] });
+      assert.equal(r.code, 1, `${other} reused as the client secret passed: ${r.out}`);
+      assert.match(r.out, new RegExp(`same string as ${other}`));
+      assert.match(r.out, /signs nothing/);
+    }
+  });
+
+  test("a short client secret is caught, with the command to make one", () => {
+    const r = check({ ...PORTAL, PORTAL_CLIENT_SECRET: "too-short" });
+    assert.equal(r.code, 1);
+    assert.match(r.out, /openssl rand/);
+  });
+
+  test("a portal URL that is not https is caught in production", () => {
+    const r = check({ ...PORTAL, PORTAL_TOKEN_URL: "http://inside.dolluzcorp.com/oauth/token" });
+    assert.equal(r.code, 1);
+    assert.match(r.out, /PORTAL_TOKEN_URL: is http:/);
+    assert.match(r.out, /refuses a non-https portal URL/);
+  });
+
+  test("a redirect URI that is not on this host is caught", () => {
+    // Inside D would send people somewhere this app does not serve, and the
+    // round trip would end on somebody else's 404.
+    const r = check({ ...PORTAL, PORTAL_REDIRECT_URI: "https://kody.example.com/extension/authorize" });
+    assert.equal(r.code, 1);
+    assert.match(r.out, /not on PUBLIC_URL/);
   });
 });

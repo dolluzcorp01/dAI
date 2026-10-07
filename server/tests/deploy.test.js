@@ -456,6 +456,101 @@ describe("production configuration guards", () => {
       assert.match(err || "", /STORAGE_DRIVER/, `STORAGE_DRIVER=${driver} was accepted`);
     }
   });
+
+  /* dAI: single sign-on from Inside D (docs/17-portal-sso.md). */
+
+  const PORTAL = {
+    PORTAL_CLIENT_ID: "dai",
+    PORTAL_CLIENT_SECRET: "portal-secret-" + "z".repeat(40),
+    PORTAL_AUTHORIZE_URL: "https://inside.dolluzcorp.com/authorize",
+    PORTAL_TOKEN_URL: "https://inside.dolluzcorp.com/oauth/token",
+    PORTAL_REDIRECT_URI: "https://dai.dolluzcorp.com/extension/authorize",
+  };
+
+  test("portal sign-on all set starts, and none set starts, which is how it ships", () => {
+    assert.equal(checkProd({ ...goodEnough, ...PORTAL }), null,
+      "a fully configured portal handoff has to be able to start");
+    assert.equal(checkProd(goodEnough), null,
+      "and so does a box with no portal handoff at all, which is today");
+  });
+
+  test("portal sign-on half configured is refused, and says which half", () => {
+    // Half is worse than none: the person is sent to Inside D and comes back to
+    // an exchange that cannot work, after the redirect has already happened.
+    for (const missing of Object.keys(PORTAL)) {
+      const err = checkProd({ ...goodEnough, ...PORTAL, [missing]: "" });
+      assert.match(err || "", /half configured/, `${missing} missing was accepted`);
+      assert.match(err || "", new RegExp(missing), `the error did not name ${missing}`);
+    }
+  });
+
+  test("the portal client secret may not be a signing secret", () => {
+    // The reason dAI is outside dAdmin's shared-secret scheme at all: holding a
+    // signing secret would let dAI mint a session as any employee in any dApp,
+    // and a compromise of dAI would become a compromise of all of them. This
+    // secret authenticates dAI to one endpoint and signs nothing.
+    const cases = {
+      JWT_ACCESS_SECRET: goodEnough.JWT_ACCESS_SECRET,
+      JWT_REFRESH_SECRET: goodEnough.JWT_REFRESH_SECRET,
+      DADMIN_SHARED_JWT_SECRET: "shared-with-dadmin-" + "q".repeat(30),
+    };
+    for (const [name, value] of Object.entries(cases)) {
+      const err = checkProd({
+        ...goodEnough, ...PORTAL,
+        DADMIN_SHARED_JWT_SECRET: cases.DADMIN_SHARED_JWT_SECRET,
+        PORTAL_CLIENT_SECRET: value,
+      });
+      assert.match(err || "", new RegExp(`same value as ${name}`),
+        `PORTAL_CLIENT_SECRET = ${name} was accepted`);
+    }
+  });
+
+  test("a short portal client secret is refused, with the command to make one", () => {
+    const err = checkProd({ ...goodEnough, ...PORTAL, PORTAL_CLIENT_SECRET: "short" });
+    assert.match(err || "", /PORTAL_CLIENT_SECRET is shorter/);
+    assert.match(err || "", /openssl rand/, "and says how to generate one");
+  });
+
+  test("the two guards that are not about production fire in development too", () => {
+    // They were production-only at first, which says it to the wrong person:
+    // the place somebody wires portal sign-on up for the first time is a laptop.
+    // https stays production-only, because a local Inside D over http is fine.
+    const checkDev = (env) => {
+      const saved = { ...process.env };
+      try {
+        delete process.env.NODE_ENV;
+        Object.assign(process.env, { NODE_ENV: "development", ...env });
+        delete require.cache[require.resolve("../src/config")];
+        require("../src/config");
+        return null;
+      } catch (err) {
+        return err.message;
+      } finally {
+        for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+        Object.assign(process.env, saved);
+        delete require.cache[require.resolve("../src/config")];
+        require("../src/config");
+      }
+    };
+
+    assert.match(checkDev({ ...PORTAL, PORTAL_REDIRECT_URI: "" }) || "", /half configured/,
+      "half configured passed in development");
+    assert.match(
+      checkDev({ ...PORTAL, JWT_ACCESS_SECRET: "E".repeat(44), PORTAL_CLIENT_SECRET: "E".repeat(44) }) || "",
+      /same value as JWT_ACCESS_SECRET/, "a signing secret as the client secret passed in development");
+    assert.equal(
+      checkDev({ ...PORTAL, PORTAL_TOKEN_URL: "http://127.0.0.1:4999/oauth/token" }), null,
+      "a local Inside D over http has to be usable on a laptop");
+  });
+
+  test("portal URLs must be https in production", () => {
+    for (const key of ["PORTAL_AUTHORIZE_URL", "PORTAL_TOKEN_URL", "PORTAL_REDIRECT_URI"]) {
+      const err = checkProd({
+        ...goodEnough, ...PORTAL, [key]: PORTAL[key].replace("https://", "http://"),
+      });
+      assert.match(err || "", new RegExp(`non-https ${key}`), `http ${key} was accepted`);
+    }
+  });
 });
 
 describe("the deploy pins Node 22, because the box is not on it", () => {

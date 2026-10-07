@@ -44,6 +44,28 @@ const refreshExpiry = () => expiryFromNow(config.auth.refreshDays * 24 * 60 * 60
 const codeExpiry = () => expiryFromNow(config.auth.codeTtlSeconds * 1000);
 
 /**
+ * dAI: how long a session lives, by how the person proved who they are.
+ *
+ * A password gets REFRESH_TOKEN_DAYS. A sign-in the Dolluz portal vouched for
+ * gets PORTAL_SESSION_HOURS, because portal logout does not end a Kody session
+ * and a session obtained from a portal session should not outlive it by a month
+ * (docs/17-portal-sso.md). Anything unrecognised gets the shorter of the two,
+ * so a typo cannot lengthen a session.
+ */
+function sessionExpiry(origin) {
+  if (origin === "portal") {
+    return expiryFromNow(config.portal.sessionHours * 60 * 60 * 1000);
+  }
+  if (origin !== undefined && origin !== null && origin !== "password") {
+    return expiryFromNow(Math.min(
+      config.portal.sessionHours * 60 * 60 * 1000,
+      config.auth.refreshDays * 24 * 60 * 60 * 1000
+    ));
+  }
+  return refreshExpiry();
+}
+
+/**
  * Redirect URIs must match the allowlist exactly. Prefix matching here would
  * let an attacker append a path and steal the code.
  */
@@ -60,6 +82,6 @@ module.exports = {
   sha256, randomToken,
   signAccessToken, verifyAccessToken,
   newRefreshToken, newAuthCode,
-  refreshExpiry, codeExpiry,
+  refreshExpiry, codeExpiry, sessionExpiry,
   isAllowedRedirect,
 };

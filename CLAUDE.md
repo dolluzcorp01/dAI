@@ -35,7 +35,7 @@ with Ask Kody (codes, knowledge, AI), team chat, files, search and notifications
    If it is destructive, point it at a scratch database or do not run it.
    Learned on 2026-10-03, by replacing `WHERE id > ?` with `WHERE id >= 0` in the test
    cleanup hook and emptying 33 of 47 tables in the development database.
-9. Migrations are numbered from 012 now; rule 2 still applies. Next is 013.
+9. Migrations are numbered from 012 now; rule 2 still applies. Next is 014.
 
 ## "Be Careful" standard (how every task is done)
 - Before: read the relevant doc and the code you will change. State the plan in a few lines.

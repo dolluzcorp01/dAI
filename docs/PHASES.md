@@ -293,6 +293,14 @@ by a real person. PENDING = not started. Update this table at the end of every s
   app_dAI is turned off between signing in on the page and the extension redeeming the code
   gets a session that dies at the first refresh. Narrow, but it is the only gap left in the
   sign-in path. Phase 4: re-check in exchangeCode, or bind the check into the code row.
+- Single sign-on from Inside D is BUILT on dAI's side and INERT: with the five PORTAL_*
+  values unset, the sign in page never leaves dai.dolluzcorp.com and the password form is
+  the only way in. The Inside D half is a separate repository and has not been built. The
+  contract it has to implement is docs/17-portal-sso.md section 5. Two things in that
+  document are open questions rather than work: whether a portal logout should end a Kody
+  session within 15 minutes (which puts Inside D in the path of every refresh) or whether
+  the 8 hour session is close enough, and whether Inside D ever shows its own login for
+  Kody rather than always answering prompt=none.
 - Extension: popup HTML/JS, side panel HTML, bubble.css, icons. Moved from Phase 3 into 1.4b.
 - deploy/: backup.sh and the pm2 deploy.sh written. Neither has run on the server. The
   Caddyfile was deleted: Caddy would collide with nginx on 80 and 443.

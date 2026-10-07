@@ -33,6 +33,12 @@
         <span id="shield-text">Authorising the Kody browser extension</span>
       </p>
 
+      <!-- Why a password is being asked for, when the Dolluz portal could not
+           answer for this person. Quiet on purpose: "you are not signed in to
+           the portal" is the ordinary state of affairs, and painting it red
+           teaches people to ignore red (docs/17-portal-sso.md). -->
+      <p id="portal-note" class="portal-note" hidden></p>
+
       <form id="form" novalidate>
         <label class="label" for="email">Work email</label>
         <input id="email" class="field" type="email" name="email" autocomplete="username"
@@ -93,6 +99,15 @@
         <li id="step-3">Extension swaps it for its own session</li>
       </ol>
       <p id="handoff-note" class="note">You can close this tab when Kody says it is signed in.</p>
+    </main>
+
+    <!-- Shown while the page is asking the Dolluz portal, or finishing a sign
+         in it answered. Either ends in the handoff above or back on the card
+         with a line saying why a password is needed after all. -->
+    <main class="handoff" id="checking" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <p class="handoff-title">One moment</p>
+      <p id="checking-note" class="note">Checking the Dolluz portal.</p>
     </main>
 
     <!-- Shown instead of the form when this page was not opened by the

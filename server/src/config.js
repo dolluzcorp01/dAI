@@ -76,6 +76,36 @@ const config = {
     resetUrl: optional("PASSWORD_RESET_URL", "") || optional("DADMIN_RESET_URL", ""),
   },
 
+  // dAI: single sign-on from Inside D (docs/17-portal-sso.md).
+  //
+  // INERT until every one of clientId, clientSecret, authorizeUrl and tokenUrl
+  // is set. With any of them missing, portalEnabled() is false, the sign in
+  // page never leaves dai.dolluzcorp.com and the password form is the only way
+  // in, which is exactly how Phase 1 works today. That is deliberate: the
+  // Inside D half is a separate repository and does not exist yet, so this
+  // code has to ship doing nothing.
+  //
+  // clientSecret authenticates dAI to Inside D's token endpoint and NOTHING
+  // else. It is its own dedicated random value: never a JWT secret, never the
+  // dAdmin shared secret. A guard below refuses to boot if it is one of those,
+  // because holding a signing secret would let dAI mint a session as any
+  // employee in any dApp, which is the thing this design exists to avoid.
+  portal: {
+    clientId: optional("PORTAL_CLIENT_ID", ""),
+    clientSecret: optional("PORTAL_CLIENT_SECRET", ""),
+    authorizeUrl: optional("PORTAL_AUTHORIZE_URL", ""),
+    tokenUrl: optional("PORTAL_TOKEN_URL", ""),
+    // Where Inside D sends people back. One exact string, on Inside D's
+    // allowlist, with no query of its own: the sign in page carries what it
+    // needs to resume in its own sessionStorage, not in this URL.
+    redirectUri: optional("PORTAL_REDIRECT_URI", ""),
+    // A Kody session that came from a portal session gets a working day, not
+    // the 30 days a password gets. Portal logout does not yet end a Kody
+    // session, so the honest thing is not to let one outlive the other by a
+    // month. docs/17-portal-sso.md "When the portal session ends".
+    sessionHours: int("PORTAL_SESSION_HOURS", 8),
+  },
+
   // Extension ids allowed to receive the auth handoff (chromiumapp.org callback).
   // Comma separated. Never a wildcard. See docs/14-extension.md.
   extensionIds: optional("EXTENSION_IDS", "")
@@ -140,7 +170,77 @@ const config = {
   },
 
   isProd() { return this.env === "production"; },
+
+  /**
+   * dAI: is single sign-on from Inside D wired up at all?
+   *
+   * All or nothing on purpose. Three values out of four is a half configured
+   * handoff that fails at the exchange, after the person has already been sent
+   * to another origin and back. Answering false here keeps them on the
+   * password form instead.
+   */
+  portalEnabled() {
+    const p = this.portal;
+    return !!(p.clientId && p.clientSecret && p.authorizeUrl && p.tokenUrl && p.redirectUri);
+  },
 };
+
+/*
+ * dAI: two guards that are NOT production-only (docs/17-portal-sso.md).
+ *
+ * The guards below this live inside the production block because what they
+ * refuse is only wrong on a server. These two are wrong anywhere, and the place
+ * somebody wires portal sign-on up for the first time is a laptop, so saying it
+ * only in production would say it to the wrong person.
+ */
+if (config.portal.clientSecret) {
+  // The Inside D client secret is its own value or dAI does not start. If it
+  // were a signing secret, dAI could mint a session as any employee in any dApp
+  // in the suite, and a compromise of dAI would become a compromise of all of
+  // them. docs/17-portal-sso.md "The secret".
+  const forbidden = {
+    JWT_ACCESS_SECRET: config.auth.accessSecret,
+    JWT_REFRESH_SECRET: config.auth.refreshSecret,
+    DADMIN_SHARED_JWT_SECRET: config.dadmin.sharedJwtSecret,
+  };
+  for (const [name, value] of Object.entries(forbidden)) {
+    if (value && config.portal.clientSecret === value) {
+      throw new Error(
+        `Refusing to start: PORTAL_CLIENT_SECRET is the same value as ${name}. `
+        + "It must be its own dedicated random value. It authenticates dAI to "
+        + "Inside D's token endpoint and signs nothing."
+      );
+    }
+  }
+  if (config.portal.clientSecret.length < 32) {
+    throw new Error(
+      "Refusing to start: PORTAL_CLIENT_SECRET is shorter than 32 characters. "
+      + "Generate one with: openssl rand -base64 48"
+    );
+  }
+}
+
+// Half a handoff is worse than none: the person is sent to Inside D and comes
+// back to an exchange that cannot work, after the redirect has already happened.
+// Say so at boot instead.
+{
+  const portalKeys = {
+    PORTAL_CLIENT_ID: config.portal.clientId,
+    PORTAL_CLIENT_SECRET: config.portal.clientSecret,
+    PORTAL_AUTHORIZE_URL: config.portal.authorizeUrl,
+    PORTAL_TOKEN_URL: config.portal.tokenUrl,
+    PORTAL_REDIRECT_URI: config.portal.redirectUri,
+  };
+  const set = Object.entries(portalKeys).filter(([, v]) => !!v).map(([k]) => k);
+  const missing = Object.entries(portalKeys).filter(([, v]) => !v).map(([k]) => k);
+  if (set.length > 0 && missing.length > 0) {
+    throw new Error(
+      `Refusing to start with portal sign-on half configured. Set is ${set.join(", ")}; `
+      + `missing is ${missing.join(", ")}. Set all five, or none of them to leave the `
+      + "password form as the only way in."
+    );
+  }
+}
 
 /*
  * In production, refuse to boot on settings that would look fine and fail
@@ -202,6 +302,15 @@ if (config.env === "production") {
       + "Every answer is canned and no model is called. "
       + "Remove ALLOW_MOCK_MODEL before anyone relies on an answer."
     );
+  }
+  // dAI: https for every portal URL. Only in production, because running
+  // against a local Inside D over http is a legitimate thing to do on a laptop.
+  for (const [key, value] of [["PORTAL_AUTHORIZE_URL", config.portal.authorizeUrl],
+                              ["PORTAL_TOKEN_URL", config.portal.tokenUrl],
+                              ["PORTAL_REDIRECT_URI", config.portal.redirectUri]]) {
+    if (value && !/^https:\/\//.test(value)) {
+      throw new Error(`Refusing to start in production with a non-https ${key}.`);
+    }
   }
   if (config.mail.driver === "memory" || config.push.driver === "memory") {
     throw new Error("Refusing to start in production with a memory transport: mail and push would vanish.");

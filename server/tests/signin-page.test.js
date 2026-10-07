@@ -53,7 +53,8 @@ after(async () => {
  * Enough DOM for this page and no more. Every id the HTML declares exists, so
  * a typo in the page shows up as a missing element rather than passing.
  */
-function fakeDom({ state, redirectUri, fetchImpl, chromeStub, flow }) {
+function fakeDom({ state, redirectUri, fetchImpl, chromeStub, flow, storage, rawSearch,
+                   withoutCrypto }) {
   // Start each element where the HTML starts it, hidden attribute included:
   // the page relies on #refused and #handoff being hidden until it says so.
   const tags = [...PAGE_HTML.matchAll(/<[a-z0-9]+[^>]*\bid="([a-z0-9-]+)"[^>]*>/g)];
@@ -95,9 +96,12 @@ function fakeDom({ state, redirectUri, fetchImpl, chromeStub, flow }) {
   }
 
   const navigations = [];
-  const search = `?state=${encodeURIComponent(state)}`
-    + `&redirect_uri=${encodeURIComponent(redirectUri)}&surface=extension`
-    + (flow ? `&flow=${flow}` : "");
+  // rawSearch is the leg back from Inside D, which carries a code or an error
+  // and the PORTAL state, and no redirect_uri at all.
+  const search = rawSearch !== undefined ? rawSearch
+    : `?state=${encodeURIComponent(state)}`
+      + `&redirect_uri=${encodeURIComponent(redirectUri)}&surface=extension`
+      + (flow ? `&flow=${flow}` : "");
 
   const context = {
     document: {
@@ -118,6 +122,14 @@ function fakeDom({ state, redirectUri, fetchImpl, chromeStub, flow }) {
     // Present only when a test asks for it, so the redirect path stays the
     // default exactly as it is in a browser without the extension installed.
     ...(chromeStub ? { chrome: chromeStub } : {}),
+    // This tab's own memory, and the browser's generator. Both are absent
+    // unless a test supplies them, because the page has to work without
+    // either: a private window is exactly that case.
+    ...(storage ? { sessionStorage: storage } : {}),
+    ...(withoutCrypto ? {} : { crypto: { getRandomValues(bytes) {
+      for (let i = 0; i < bytes.length; i += 1) bytes[i] = (i * 37 + 11) % 256;
+      return bytes;
+    } } }),
   };
   context.window = context;
 
@@ -126,12 +138,64 @@ function fakeDom({ state, redirectUri, fetchImpl, chromeStub, flow }) {
   return {
     el: (id) => elements.get(id),
     navigations,
+    // The portal legs are asynchronous: a fetch, then a decision. Nothing in
+    // the page is on a timer, so one turn of the loop is enough, and 25ms is
+    // one turn plus room for a real request to the local server.
+    settle: (ms = 25) => new Promise(r => setTimeout(r, ms)),
     fire: (id, type, event = { preventDefault() {} }) => {
       const fn = handlers.get(`${id}:${type}`);
       assert.ok(fn, `nothing is listening for ${type} on ${id}`);
       return fn(event);
     },
   };
+}
+
+/**
+ * sessionStorage as a browser gives it: it can also THROW rather than return
+ * null, which is what a private window or blocked site data does, and that is
+ * the case the page has to survive.
+ */
+function fakeStorage({ throws = false, start = {} } = {}) {
+  const map = new Map(Object.entries(start));
+  const writes = [];
+  const guard = () => { if (throws) throw new Error("site data is blocked in this window"); };
+  return {
+    map,
+    writes,
+    setItem(key, value) { guard(); writes.push([key, String(value)]); map.set(key, String(value)); },
+    getItem(key) { guard(); return map.has(key) ? map.get(key) : null; },
+    removeItem(key) { guard(); map.delete(key); },
+  };
+}
+
+const PORTAL_CONFIG = {
+  enabled: true,
+  authorizeUrl: "https://inside.dolluzcorp.com/authorize",
+  clientId: "dai",
+  redirectUri: "https://dai.dolluzcorp.com/extension/authorize",
+  sessionHours: 8,
+};
+
+/**
+ * A fetch that answers the portal endpoints from a script and sends everything
+ * else to the real server, so the password path in the same test file is still
+ * talking to real code.
+ */
+function portalFetch({ config: cfg = PORTAL_CONFIG, callback: cb, calls = [] } = {}) {
+  const impl = (url, options) => {
+    const path = String(url);
+    calls.push({ path, body: options && options.body ? JSON.parse(options.body) : null });
+    if (path.startsWith("/api/auth/portal/config")) {
+      return Promise.resolve({ ok: true, status: 200, json: async () => cfg });
+    }
+    if (path.startsWith("/api/auth/portal/callback")) {
+      const answer = cb || { ok: true, status: 200, body: { code: "kody-code", origin: "portal", sessionHours: 8 } };
+      return Promise.resolve({ ok: answer.ok, status: answer.status, json: async () => answer.body });
+    }
+    return fetch(`${base}${path}`, options);
+  };
+  impl.calls = calls;
+  return impl;
 }
 
 describe("the page decides whether to show a password field at all", () => {
@@ -292,6 +356,340 @@ describe("the handoff says when it has finished", () => {
     assert.equal(dom.navigations.length, 1, "it should fall back to the callback");
     assert.ok(!dom.el("spinner").classList.contains("done"),
       "nothing finished, so nothing should say it did");
+  });
+});
+
+describe("the Dolluz portal is asked before a password is", () => {
+  /**
+   * docs/17-portal-sso.md. Inside D does not exist yet, so the page's whole
+   * half of the handoff runs here against a scripted /portal/config: what it
+   * sends people to, what it keeps while they are away, what it does with the
+   * answer, and every way it can fall back to the password form.
+   */
+  const STORE_KEY = "kody.portal.request";
+  const TRIED_KEY = "kody.portal.tried";
+
+  test("with the portal not configured it does nothing at all", async () => {
+    // The state this repository ships in. The Inside D half is a separate
+    // repository and does not exist, so the feature has to be inert: the real
+    // server answers enabled:false here, and the page must never leave it.
+    const storage = fakeStorage();
+    const dom = fakeDom({ state: "p".repeat(24), redirectUri: CALLBACK, storage });
+    await dom.settle();
+
+    assert.equal(dom.navigations.length, 0, "it sent somebody to a portal that is not configured");
+    assert.equal(dom.el("card").hidden, false, "the password form must be there");
+    assert.equal(dom.el("checking").hidden, true);
+    assert.equal(dom.el("portal-note").hidden, true, "it explained something that did not happen");
+    assert.deepEqual(storage.writes, [], "it wrote to the tab for a feature that is off");
+  });
+
+  test("with it configured, the person goes to Inside D and not to a password field", async () => {
+    const storage = fakeStorage();
+    const dom = fakeDom({
+      state: "q".repeat(24), redirectUri: CALLBACK, storage, flow: "tab",
+      fetchImpl: portalFetch(),
+    });
+    await dom.settle();
+
+    assert.equal(dom.navigations.length, 1, "nobody was sent to the portal");
+    const url = new URL(dom.navigations[0]);
+    assert.equal(url.origin + url.pathname, "https://inside.dolluzcorp.com/authorize");
+    assert.equal(url.searchParams.get("client_id"), "dai");
+    assert.equal(url.searchParams.get("redirect_uri"), PORTAL_CONFIG.redirectUri);
+    assert.equal(url.searchParams.get("response_type"), "code");
+
+    // prompt=none is what stops this being a trap. Inside D answers either way
+    // and never shows its own sign in page, so somebody with no portal session
+    // comes straight back to Kody's form instead of landing somewhere
+    // unfamiliar with no way out.
+    assert.equal(url.searchParams.get("prompt"), "none");
+
+    // A state of its own, from the browser's generator, long enough to matter.
+    const portalState = url.searchParams.get("state");
+    assert.match(portalState, /^[0-9a-f]{32}$/);
+    assert.notEqual(portalState, "q".repeat(24), "it reused the extension's state");
+
+    // And the card is gone, so nobody starts typing a password into a page
+    // that is about to navigate away.
+    assert.equal(dom.el("card").hidden, true);
+    assert.equal(dom.el("checking").hidden, false);
+  });
+
+  test("what the extension asked for is kept, because the URL cannot carry it", async () => {
+    // Inside D is given ONE fixed redirect_uri with no query of its own: an
+    // allowlist that has to tolerate varying query strings is not much of an
+    // allowlist. So the state, the callback and the flow wait in this tab.
+    const storage = fakeStorage();
+    const dom = fakeDom({
+      state: "r".repeat(24), redirectUri: CALLBACK, storage, flow: "tab",
+      fetchImpl: portalFetch(),
+    });
+    await dom.settle();
+
+    const saved = JSON.parse(storage.map.get(STORE_KEY));
+    assert.equal(saved.state, "r".repeat(24));
+    assert.equal(saved.redirectUri, CALLBACK);
+    assert.equal(saved.flow, "tab");
+    assert.match(saved.portalState, /^[0-9a-f]{32}$/);
+    assert.equal(storage.map.get(TRIED_KEY), "1");
+
+    // Nothing else. A password is never near this, and neither is an email.
+    assert.deepEqual(Object.keys(saved).sort(),
+      ["flow", "portalState", "redirectUri", "state", "surface"]);
+  });
+
+  test("nowhere to keep the state means no round trip", async () => {
+    // A private window, or site data blocked. The reply could not be checked
+    // on the way back, and a round trip whose answer cannot be checked is
+    // worse than asking for a password.
+    const storage = fakeStorage({ throws: true });
+    const dom = fakeDom({
+      state: "s".repeat(24), redirectUri: CALLBACK, storage,
+      fetchImpl: portalFetch(),
+    });
+    await dom.settle();
+
+    assert.equal(dom.navigations.length, 0, "it went anyway, with nothing to compare on return");
+    assert.equal(dom.el("card").hidden, false);
+    assert.equal(dom.el("portal-note").hidden, false, "it did not say why a password is needed");
+    assert.match(dom.el("portal-note").textContent, /password/);
+  });
+
+  test("no sessionStorage at all is the same answer, not an exception", async () => {
+    // Older or stricter embedders. The page is a password form that works.
+    const dom = fakeDom({
+      state: "t".repeat(24), redirectUri: CALLBACK, fetchImpl: portalFetch(),
+    });
+    await dom.settle();
+    assert.equal(dom.navigations.length, 0);
+    assert.equal(dom.el("card").hidden, false);
+  });
+
+  test("no generator means no portal, because the state would not be random", async () => {
+    const storage = fakeStorage();
+    const dom = fakeDom({
+      state: "u".repeat(24), redirectUri: CALLBACK, storage, withoutCrypto: true,
+      fetchImpl: portalFetch(),
+    });
+    await dom.settle();
+    assert.equal(dom.navigations.length, 0, "it invented a state value without a generator");
+    assert.equal(dom.el("card").hidden, false);
+  });
+
+  test("it does not go round a second time", async () => {
+    // The loop this prevents: come back from the portal with an error, reload,
+    // go again, come back with an error. The marker is set before leaving.
+    const storage = fakeStorage({ start: { [TRIED_KEY]: "1" } });
+    const dom = fakeDom({
+      state: "v".repeat(24), redirectUri: CALLBACK, storage,
+      fetchImpl: portalFetch(),
+    });
+    await dom.settle();
+    assert.equal(dom.navigations.length, 0, "it bounced to the portal a second time");
+    assert.equal(dom.el("card").hidden, false);
+  });
+
+  test("a portal that cannot be asked at all leaves the form exactly as it was", async () => {
+    const storage = fakeStorage();
+    const dom = fakeDom({
+      state: "w".repeat(24), redirectUri: CALLBACK, storage,
+      fetchImpl: () => Promise.reject(new Error("offline")),
+    });
+    await dom.settle();
+    assert.equal(dom.navigations.length, 0);
+    assert.equal(dom.el("card").hidden, false);
+    assert.equal(dom.el("error").hidden, true, "a portal that is down is not a sign in error");
+  });
+});
+
+describe("coming back from the Dolluz portal", () => {
+  const STORE_KEY = "kody.portal.request";
+
+  /** The tab as it is when Inside D sends somebody back. */
+  const returning = ({ portalState = "a".repeat(32), stored = true, flow = "tab",
+                       code, error, state }) => {
+    const request = JSON.stringify({
+      portalState, state: "x".repeat(24), redirectUri: CALLBACK, flow, surface: "extension",
+    });
+    const storage = fakeStorage({ start: stored ? { [STORE_KEY]: request } : {} });
+    const params = new URLSearchParams();
+    if (code) params.set("code", code);
+    if (error) params.set("error", error);
+    params.set("state", state === undefined ? portalState : state);
+    return { storage, rawSearch: `?${params.toString()}` };
+  };
+
+  const chromeAccepting = () => {
+    const asked = [];
+    return {
+      asked,
+      runtime: {
+        sendMessage(extensionId, message, callback) { asked.push(message); callback({ ok: true }); },
+      },
+    };
+  };
+
+  test("nobody signed in to the portal is a quiet line, not an error", async () => {
+    // login_required is what Inside D says when there is no portal session,
+    // which is most of the time. Painting that red teaches people to ignore
+    // red, so it goes above the form in the colour the page uses for "read
+    // this" and the form works as it always did.
+    const { storage, rawSearch } = returning({ error: "login_required" });
+    const dom = fakeDom({ storage, rawSearch, fetchImpl: portalFetch() });
+    await dom.settle();
+
+    assert.equal(dom.el("card").hidden, false, "the password form has to be there");
+    assert.equal(dom.el("refused").hidden, true);
+    assert.equal(dom.el("error").hidden, true, "not signed in to the portal is not an error");
+    assert.equal(dom.el("portal-note").hidden, false);
+    assert.match(dom.el("portal-note").textContent, /not signed in to the Dolluz portal/);
+    assert.equal(dom.navigations.length, 0);
+  });
+
+  test("a portal that refused says the portal refused, not that a password is wrong", async () => {
+    const { storage, rawSearch } = returning({ error: "access_denied" });
+    const dom = fakeDom({ storage, rawSearch, fetchImpl: portalFetch() });
+    await dom.settle();
+    assert.match(dom.el("portal-note").textContent, /Dolluz portal did not allow/);
+    assert.equal(dom.el("card").hidden, false);
+  });
+
+  test("a state that does not match is refused, and nothing is exchanged", async () => {
+    // Somebody else's handoff code, pushed at this page. The state was made
+    // here, kept here, and never left this origin except as a value Inside D
+    // echoes back, so this is the check that catches it.
+    const impl = portalFetch();
+    const { storage, rawSearch } = returning({ code: "someone-elses-code", state: "b".repeat(32) });
+    const dom = fakeDom({ storage, rawSearch, fetchImpl: impl });
+    await dom.settle();
+
+    assert.equal(dom.el("refused").hidden, false, "it carried on with a state that did not match");
+    assert.equal(dom.el("card").hidden, true);
+    assert.ok(!impl.calls.some(c => c.path.includes("/portal/callback")),
+      "it exchanged a code whose state did not match");
+  });
+
+  test("a tab that never started the trip is refused", async () => {
+    const impl = portalFetch();
+    const { storage, rawSearch } = returning({ code: "a-code", stored: false });
+    const dom = fakeDom({ storage, rawSearch, fetchImpl: impl });
+    await dom.settle();
+
+    assert.equal(dom.el("refused").hidden, false);
+    assert.match(dom.el("refused-body").textContent, /did not start in this tab/);
+    assert.ok(!impl.calls.some(c => c.path.includes("/portal/callback")));
+  });
+
+  test("the stored request is used once and dropped", async () => {
+    // Otherwise going back in history replays the whole leg.
+    const { storage, rawSearch } = returning({ error: "login_required" });
+    const dom = fakeDom({ storage, rawSearch, fetchImpl: portalFetch() });
+    await dom.settle();
+    assert.equal(storage.map.has(STORE_KEY), false, "the request is still sitting in the tab");
+  });
+
+  test("a code is swapped on the server, and the extension gets a Kody code", async () => {
+    const impl = portalFetch();
+    const chromeStub = chromeAccepting();
+    const { storage, rawSearch } = returning({ code: "portal-code-1" });
+    const dom = fakeDom({ storage, rawSearch, fetchImpl: impl, chromeStub });
+    await dom.settle();
+
+    const post = impl.calls.find(c => c.path.includes("/portal/callback"));
+    assert.ok(post, "the code was never exchanged");
+    assert.equal(post.body.portal_code, "portal-code-1");
+    // Bound to what the EXTENSION asked for, recovered from this tab.
+    assert.equal(post.body.state, "x".repeat(24));
+    assert.equal(post.body.redirect_uri, CALLBACK);
+
+    assert.equal(chromeStub.asked.length, 1, "the extension was never given the code");
+    assert.equal(chromeStub.asked[0].code, "kody-code");
+    assert.equal(dom.el("handoff").hidden, false);
+    assert.equal(dom.el("checking").hidden, true);
+    assert.ok(dom.el("spinner").classList.contains("done"));
+  });
+
+  test("a portal sign-in says out loud that it lasts hours, not a month", async () => {
+    // It is shorter than a password sign-in on purpose. Somebody who is not
+    // told that just finds Kody signed out in the evening and reasonably
+    // concludes it is broken. docs/17-portal-sso.md.
+    const { storage, rawSearch } = returning({ code: "portal-code-2" });
+    const dom = fakeDom({
+      storage, rawSearch, chromeStub: chromeAccepting(),
+      fetchImpl: portalFetch(),
+    });
+    await dom.settle();
+
+    const note = dom.el("handoff-note").textContent;
+    assert.match(note, /8 hours/);
+    assert.match(note, /30 days/);
+    assert.match(note, /Dolluz portal/);
+    assert.match(dom.el("step-1").textContent, /Dolluz portal/);
+  });
+
+  test("a password sign-in says nothing about hours, because it has 30 days", async () => {
+    const chromeStub = chromeAccepting();
+    const dom = fakeDom({
+      state: "y".repeat(24), redirectUri: CALLBACK, flow: "tab", chromeStub,
+      storage: fakeStorage(),
+    });
+    dom.el("email").value = EMAIL;
+    dom.el("password").value = PASSWORD;
+    await dom.fire("form", "submit");
+    await dom.settle();
+
+    assert.equal(dom.el("handoff").hidden, false, "the password path broke");
+    assert.ok(!/hours/.test(dom.el("handoff-note").textContent),
+      `a password sign-in talked about hours: ${dom.el("handoff-note").textContent}`);
+  });
+
+  test("an account without Kody access is NOT offered the password form", async () => {
+    // The password would be refused for the same reason. Sending them to type
+    // one is sending them to fail twice.
+    const { storage, rawSearch } = returning({ code: "portal-code-3" });
+    const dom = fakeDom({
+      storage, rawSearch,
+      fetchImpl: portalFetch({
+        callback: { ok: false, status: 403, body: { error: "dai_not_enabled" } },
+      }),
+    });
+    await dom.settle();
+
+    assert.equal(dom.el("error").hidden, false, "it said nothing about the real problem");
+    assert.match(dom.el("error").textContent, /does not have Kody access/);
+    assert.equal(dom.el("portal-note").hidden, true,
+      "it suggested a password, which will be refused for the same reason");
+  });
+
+  test("a portal that did not answer sends them to the password form, and says so", async () => {
+    const { storage, rawSearch } = returning({ code: "portal-code-4" });
+    const dom = fakeDom({
+      storage, rawSearch,
+      fetchImpl: portalFetch({
+        callback: { ok: false, status: 502, body: { error: "portal_unreachable" } },
+      }),
+    });
+    await dom.settle();
+
+    assert.equal(dom.el("card").hidden, false);
+    assert.equal(dom.el("checking").hidden, true);
+    assert.match(dom.el("portal-note").textContent, /did not answer/);
+    assert.match(dom.el("portal-note").textContent, /password/);
+  });
+
+  test("Kody itself not answering is not blamed on the portal", async () => {
+    const { storage, rawSearch } = returning({ code: "portal-code-5" });
+    const dom = fakeDom({
+      storage, rawSearch,
+      fetchImpl: (url) => (String(url).includes("/portal/callback")
+        ? Promise.reject(new Error("dropped"))
+        : Promise.resolve({ ok: true, status: 200, json: async () => PORTAL_CONFIG })),
+    });
+    await dom.settle();
+
+    assert.equal(dom.el("card").hidden, false);
+    assert.match(dom.el("portal-note").textContent, /Kody did not answer/);
   });
 });
 
@@ -469,9 +867,42 @@ describe("how the page is served", () => {
   });
 
   test("the page never keeps the password anywhere", () => {
-    assert.ok(!/localStorage|sessionStorage|indexedDB|document\.cookie/.test(PAGE_SOURCE),
-      "a password page must not persist anything");
+    // Nothing that outlives the tab, ever. localStorage and a cookie would
+    // still be there tomorrow and are shared with every other page on this
+    // origin, so they stay banned outright.
+    assert.ok(!/localStorage|indexedDB|document\.cookie/.test(PAGE_SOURCE),
+      "a password page must not persist anything beyond the tab");
+
+    // sessionStorage IS used, for the portal round trip (docs/17-portal-sso.md),
+    // and it is reachable in exactly three places: one to write by key, one to
+    // read by key, one to remove by key. Nothing in the page can put a literal
+    // in storage, which is the property that matters here, and a fourth
+    // appearance fails this test rather than being reviewed by hand later.
+    // Code lines only. A comment that mentions sessionStorage is a comment, and
+    // a test that counted those would be measuring the prose.
+    const lines = PAGE_SOURCE.split("\n")
+      .filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .filter(l => l.includes("sessionStorage"));
+    assert.equal(lines.length, 3, `sessionStorage is touched in ${lines.length} places:\n${lines.join("\n")}`);
+    assert.match(lines[0], /sessionStorage\.setItem\(key, value\)/);
+    assert.match(lines[1], /sessionStorage\.getItem\(key\)/);
+    assert.match(lines[2], /sessionStorage\.removeItem\(key\)/);
+
     assert.ok(!/innerHTML|insertAdjacentHTML|document\.write/.test(PAGE_SOURCE));
     assert.ok(!/\beval\s*\(|new\s+Function\s*\(/.test(PAGE_SOURCE));
+  });
+
+  test("and a password sign-in writes nothing to the tab", async () => {
+    // The static check above says a literal cannot be stored. This says that
+    // on the path where a password exists, nothing is stored at all.
+    const storage = fakeStorage();
+    const dom = fakeDom({ state: "H".repeat(24), redirectUri: CALLBACK, storage });
+    dom.el("email").value = EMAIL;
+    dom.el("password").value = PASSWORD;
+    await dom.fire("form", "submit");
+    await dom.settle();
+
+    assert.deepEqual(storage.writes, [],
+      `the page wrote ${JSON.stringify(storage.writes)} while signing in with a password`);
   });
 });

@@ -4,6 +4,7 @@ const config = require("../config");
 const { hashPassword, verifyPassword, fakeVerify } = require("../lib/password");
 const T = require("../lib/tokens");
 const dadmin = require("./dadmin.service");   // dAI: the dAdmin link (docs/PHASES.md 1.1)
+const portal = require("./portal.service");   // dAI: the Inside D link (docs/17-portal-sso.md)
 
 class AuthError extends Error {
   constructor(status, code, message) {
@@ -14,6 +15,10 @@ class AuthError extends Error {
 }
 
 const SURFACES = ["web", "extension", "desktop", "android", "ios"];
+
+/* dAI: how somebody proved who they are. See migration 013 for why it is
+   stored on the session row rather than worked out from anything else. */
+const ORIGINS = ["password", "portal"];
 
 function ipToBuffer(ip) {
   if (!ip) return null;
@@ -94,18 +99,29 @@ async function authenticate(email, password, ctx = {}) {
   return { id: user.id, email: user.email, fullName: user.full_name };
 }
 
-/** Create a session row and return the token pair. */
-async function issueSession(userId, surface, ctx = {}) {
+/**
+ * Create a session row and return the token pair.
+ *
+ * dAI: `origin` decides how long the refresh token lives. A password gets
+ * REFRESH_TOKEN_DAYS, 30 by default. A sign-in vouched for by the Dolluz portal
+ * gets PORTAL_SESSION_HOURS, 8 by default, because portal logout does not end a
+ * Kody session and a session obtained from a portal session should not outlive
+ * it by a month (docs/17-portal-sso.md).
+ */
+async function issueSession(userId, surface, ctx = {}, { origin = "password" } = {}) {
   if (!SURFACES.includes(surface)) {
     throw new AuthError(400, "bad_surface", "Unknown surface.");
   }
+  if (!ORIGINS.includes(origin)) {
+    throw new AuthError(400, "bad_origin", "Unknown sign-in origin.");
+  }
   const refresh = T.newRefreshToken();
-  const expiresAt = T.refreshExpiry();
+  const expiresAt = T.sessionExpiry(origin);
 
   const [res] = await db.query(
-    `INSERT INTO sessions (user_id, surface, refresh_token_hash, user_agent, ip_address, expires_at, last_used_at)
-     VALUES (?,?,?,?,?,?,NOW())`,
-    [userId, surface, refresh.hash,
+    `INSERT INTO sessions (user_id, surface, origin, refresh_token_hash, user_agent, ip_address, expires_at, last_used_at)
+     VALUES (?,?,?,?,?,?,?,NOW())`,
+    [userId, surface, origin, refresh.hash,
      ctx.userAgent ? String(ctx.userAgent).slice(0, 400) : null,
      ipToBuffer(ctx.ip), expiresAt]
   );
@@ -115,7 +131,7 @@ async function issueSession(userId, surface, ctx = {}) {
 
   await audit(null, {
     actorId: userId, action: "auth.session_issued", entityType: "session", entityId: res.insertId,
-    ip: ctx.ip, userAgent: ctx.userAgent, meta: { surface },
+    ip: ctx.ip, userAgent: ctx.userAgent, meta: { surface, origin },
   });
 
   return {
@@ -124,6 +140,10 @@ async function issueSession(userId, surface, ctx = {}) {
     expiresIn: config.auth.accessMinutes * 60,
     sessionId: res.insertId,
     roles,
+    origin,
+    // So the page and the panel can SAY how long this lasts, rather than
+    // letting somebody find out by being signed out (docs/17-portal-sso.md).
+    sessionExpiresAt: expiresAt.toISOString(),
   };
 }
 
@@ -138,13 +158,26 @@ async function issueSession(userId, surface, ctx = {}) {
 /**
  * dAI: the one way in, for every surface (docs/PHASES.md 1.1).
  *
- * dadmin first, because that is where real people's credentials live. A local
- * Kody password is a development and test convenience only, so production
- * refuses it. Both the web login and the extension handoff call this: when
- * only login did, a real employee could sign in on the site but not through
- * the extension, because they have no local password at all.
+ * Two ways to prove who you are:
+ *
+ *   password      checked against dadmin.employee, because that is where real
+ *                 people's credentials live. A local Kody password is a
+ *                 development and test convenience only, so production refuses
+ *                 it. Both the web login and the extension handoff call this:
+ *                 when only login did, a real employee could sign in on the
+ *                 site but not through the extension, because they have no
+ *                 local password at all.
+ *   portalEmpId   an emp_id Inside D has vouched for, after a server to server
+ *                 exchange of a one-time code (docs/17-portal-sso.md).
+ *
+ * ONE place decides whether the person may use Kody at all, and it is neither
+ * of those: dadmin.service's accessProblem(), which both branches end at. That
+ * is what makes app_dAI impossible to route around. Portal access is not Kody
+ * access.
  */
-async function resolveUser(email, password, ctx = {}) {
+async function resolveUser({ email, password, portalEmpId }, ctx = {}) {
+  if (portalEmpId) return resolveFromPortal(portalEmpId, ctx);
+
   let user = null;
   try {
     user = await dadmin.signIn(email, password);
@@ -171,8 +204,31 @@ async function resolveUser(email, password, ctx = {}) {
   return user;
 }
 
+/**
+ * dAI: the portal branch of resolveUser (docs/17-portal-sso.md).
+ *
+ * Inside D proved WHO. dadmin decides WHETHER, through the same accessProblem()
+ * the password path goes through. There is no fall-through to a local Kody
+ * password here in any environment: a vouched emp_id that dadmin has never
+ * heard of is a fault somewhere, not a development convenience.
+ */
+async function resolveFromPortal(portalEmpId, ctx = {}) {
+  try {
+    return await dadmin.signInWithEmpId(portalEmpId);
+  } catch (err) {
+    if (err instanceof dadmin.DadminError) {
+      await audit(null, {
+        actorId: null, action: "auth.portal_login_refused", entityType: "user", entityId: null,
+        ip: ctx.ip, userAgent: ctx.userAgent, meta: { reason: err.code },
+      });
+      throw new AuthError(err.status, err.code, err.message);
+    }
+    throw err;
+  }
+}
+
 async function login({ email, password, surface = "web" }, ctx = {}) {
-  const user = await resolveUser(email, password, ctx);
+  const user = await resolveUser({ email, password }, ctx);
 
   const tokens = await issueSession(user.id, surface, ctx);
   return { user: { id: user.id, email: user.email, fullName: user.fullName }, ...tokens };
@@ -184,27 +240,34 @@ async function login({ email, password, surface = "web" }, ctx = {}) {
  * No tokens are returned here, because this response travels through a
  * browser redirect.
  */
-async function authorize({ email, password, state, redirectUri, surface = "extension" }, ctx = {}) {
+async function authorize({ email, password, portalEmpId, state, redirectUri, surface = "extension" }, ctx = {}) {
   if (!state || String(state).length < 8) {
     throw new AuthError(400, "bad_state", "A state value is required.");
   }
   if (!T.isAllowedRedirect(redirectUri)) {
     throw new AuthError(400, "bad_redirect_uri", "This redirect URI is not allowed.");
   }
-  const user = await resolveUser(email, password, ctx);   // dAI: dadmin first, as login does
+  // dAI: dadmin first, as login does. portalEmpId is the Inside D path, and it
+  // is never something a browser sent: the route fills it in only after
+  // exchanging a one-time code with Inside D server to server, so a request
+  // that puts portal_emp_id in its body gets nowhere (docs/17-portal-sso.md).
+  const user = await resolveUser({ email, password, portalEmpId }, ctx);
+  const origin = portalEmpId ? "portal" : "password";
   const code = T.newAuthCode();
 
   await db.query(
-    `INSERT INTO auth_codes (code_hash, user_id, surface, state, redirect_uri, expires_at)
-     VALUES (?,?,?,?,?,?)`,
-    [code.hash, user.id, surface, String(state), redirectUri, T.codeExpiry()]
+    `INSERT INTO auth_codes (code_hash, user_id, surface, origin, state, redirect_uri, expires_at)
+     VALUES (?,?,?,?,?,?,?)`,
+    [code.hash, user.id, surface, origin, String(state), redirectUri, T.codeExpiry()]
   );
   await audit(null, {
     actorId: user.id, action: "auth.code_issued", entityType: "user", entityId: user.id,
-    ip: ctx.ip, userAgent: ctx.userAgent, meta: { surface, redirectUri },
+    ip: ctx.ip, userAgent: ctx.userAgent, meta: { surface, origin, redirectUri },
   });
 
-  return { code: code.code, state: String(state), expiresIn: config.auth.codeTtlSeconds };
+  return {
+    code: code.code, state: String(state), expiresIn: config.auth.codeTtlSeconds, origin,
+  };
 }
 
 /**
@@ -228,10 +291,13 @@ async function exchangeCode({ code, state, redirectUri }, ctx = {}) {
       throw new AuthError(400, "redirect_mismatch", "Redirect URI does not match.");
     }
     await conn.query(`UPDATE auth_codes SET consumed_at = NOW() WHERE id = ?`, [row.id]);
-    return { userId: row.user_id, surface: row.surface };
+    return { userId: row.user_id, surface: row.surface, origin: row.origin };
   });
 
-  const tokens = await issueSession(result.userId, result.surface, ctx);
+  // dAI: the code carries how the person proved who they are, so the session it
+  // becomes gets the right lifetime (docs/17-portal-sso.md).
+  const tokens = await issueSession(result.userId, result.surface, ctx,
+    { origin: result.origin || "password" });
   const user = await db.one(
     `SELECT id, email, full_name AS fullName, initials, job_title AS jobTitle, team, timezone
        FROM users WHERE id = ?`, [result.userId]
@@ -266,6 +332,16 @@ async function refresh({ refreshToken }, ctx = {}) {
   }
 
   if (new Date(session.expires_at) < new Date()) {
+    // dAI: a portal session is deliberately shorter than a password one, so say
+    // which happened. Otherwise somebody who signed in through the portal this
+    // morning finds Kody signed out this evening with no explanation, and
+    // reasonably concludes something is broken (docs/17-portal-sso.md).
+    if (session.origin === "portal") {
+      throw new AuthError(401, "portal_session_ended",
+        "Your Kody session came from the Dolluz portal, so it lasts "
+        + `${config.portal.sessionHours} hours rather than ${config.auth.refreshDays} days. `
+        + "Sign in again to carry on.");
+    }
     throw new AuthError(401, "refresh_expired", "Session expired. Sign in again.");
   }
 
@@ -291,17 +367,23 @@ async function refresh({ refreshToken }, ctx = {}) {
   }
 
   const next = T.newRefreshToken();
+  // dAI: rotation INSERTs a new row every fifteen minutes, so the origin has to
+  // travel with it. Without this line a portal session is issued for 8 hours
+  // and then promoted to 30 days by its own first refresh, and the shorter
+  // lifetime lasts a quarter of an hour (docs/17-portal-sso.md).
+  const origin = ORIGINS.includes(session.origin) ? session.origin : "password";
+  const expiresAt = T.sessionExpiry(origin);
   await db.transaction(async (conn) => {
     await conn.query(
       `UPDATE sessions SET revoked_at = NOW(), revoked_reason = 'rotated' WHERE id = ?`,
       [session.id]
     );
     await conn.query(
-      `INSERT INTO sessions (user_id, surface, refresh_token_hash, user_agent, ip_address, expires_at, last_used_at)
-       VALUES (?,?,?,?,?,?,NOW())`,
-      [session.user_id, session.surface, next.hash,
+      `INSERT INTO sessions (user_id, surface, origin, refresh_token_hash, user_agent, ip_address, expires_at, last_used_at)
+       VALUES (?,?,?,?,?,?,?,NOW())`,
+      [session.user_id, session.surface, origin, next.hash,
        ctx.userAgent ? String(ctx.userAgent).slice(0, 400) : null,
-       ipToBuffer(ctx.ip), T.refreshExpiry()]
+       ipToBuffer(ctx.ip), expiresAt]
     );
   });
 
@@ -315,6 +397,8 @@ async function refresh({ refreshToken }, ctx = {}) {
     refreshToken: next.token,
     expiresIn: config.auth.accessMinutes * 60,
     roles,
+    origin,
+    sessionExpiresAt: expiresAt.toISOString(),
   };
 }
 
@@ -341,7 +425,7 @@ async function logout({ refreshToken, sessionId }, ctx = {}) {
 
 async function listSessions(userId) {
   const [rows] = await db.query(
-    `SELECT id, surface, user_agent, issued_at, last_used_at, expires_at, revoked_at
+    `SELECT id, surface, origin, user_agent, issued_at, last_used_at, expires_at, revoked_at
        FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > NOW()
       ORDER BY issued_at DESC`,
     [userId]
@@ -376,7 +460,8 @@ async function setPassword(userId, plain) {
 }
 
 module.exports = {
-  AuthError, audit, rolesFor,
+  AuthError, audit, rolesFor, ORIGINS,
   login, authorize, exchangeCode, refresh, logout,
-  listSessions, revokeSession, setPassword, issueSession, authenticate,
+  listSessions, revokeSession, setPassword, issueSession, authenticate, resolveUser,
+  portal,
 };
