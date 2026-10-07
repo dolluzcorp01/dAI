@@ -93,10 +93,14 @@ const insideD = {
   codes: new Map(),      // code -> emp_id, single use, as the contract requires
 };
 
-const api = async (method, p, body, token) => {
+const api = async (method, p, body, token, cookie) => {
   const res = await fetch(`${base}${p}`, {
     method,
-    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(cookie ? { Cookie: cookie } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   let json = null;
@@ -123,6 +127,10 @@ const signInThroughPortal = async (empId, state) => {
   });
   return { authorized, tokens };
 };
+
+/* A browser carrying a portal cookie. The value is deliberately nonsense: dAI
+   must never do anything with it except notice that there is one. */
+const PORTAL_COOKIE = "dolluzcorp_token=not-a-real-token-and-never-read";
 
 const sessionRow = (id) => db.one(
   "SELECT id, origin, surface, expires_at, revoked_at FROM sessions WHERE id = ?", [id]
@@ -190,7 +198,9 @@ after(async () => {
 
 describe("what the sign in page is told", () => {
   test("it is told where to send people, and nothing secret", async () => {
-    const { status, body } = await api("GET", "/api/auth/portal/config");
+    // With a portal cookie on the request. Without one the answer is
+    // enabled:false, which has its own tests below.
+    const { status, body } = await api("GET", "/api/auth/portal/config", null, null, PORTAL_COOKIE);
     assert.equal(status, 200);
     assert.equal(body.enabled, true);
     assert.equal(body.authorizeUrl, "https://inside.example.com/authorize");
@@ -212,8 +222,8 @@ describe("what the sign in page is told", () => {
     config.portal.clientId = "";
     try {
       assert.equal(portalSvc.enabled(), false);
-      const cfg = await api("GET", "/api/auth/portal/config");
-      assert.deepEqual(cfg.body, { enabled: false });
+      const cfg = await api("GET", "/api/auth/portal/config", null, null, PORTAL_COOKIE);
+      assert.deepEqual(cfg.body, { enabled: false, reason: "not_configured" });
 
       const out = await api("POST", "/api/auth/portal/callback",
         { portal_code: "anything", state: "s".repeat(24), redirect_uri: CALLBACK });
@@ -222,6 +232,121 @@ describe("what the sign in page is told", () => {
     } finally {
       config.portal.clientId = real;
     }
+  });
+});
+
+describe("a browser with no portal cookie is not sent on a round trip", () => {
+  /**
+   * An AR caller never opens the portal, so prompt=none could only ever come
+   * back login_required for them: one wasted redirect on every single sign in,
+   * for people who will never benefit. The cookie is on .dolluzcorp.com, so it
+   * reaches this server even though the page's JavaScript cannot see it, and
+   * noticing that it is ABSENT is enough to skip the trip.
+   *
+   * Presence is a hint, not proof. Nothing is authorised on the strength of it:
+   * the worst case of a wrong yes is the redirect that used to happen anyway.
+   */
+  const configWith = (cookie) =>
+    api("GET", "/api/auth/portal/config", null, null, cookie);
+
+  test("no cookie header at all: the handoff is off, and says why", async () => {
+    const { status, body } = await configWith(undefined);
+    assert.equal(status, 200);
+    assert.equal(body.enabled, false);
+    assert.equal(body.reason, "no_portal_cookie");
+    assert.ok(!body.authorizeUrl, "it still told the page where to go");
+  });
+
+  test("a portal cookie: the handoff is on", async () => {
+    const { body } = await configWith(PORTAL_COOKIE);
+    assert.equal(body.enabled, true);
+    assert.ok(body.authorizeUrl);
+  });
+
+  test("other cookies but not that one: still off", async () => {
+    const { body } = await configWith("theme=dark; sidebar=open; _ga=GA1.2.3");
+    assert.equal(body.enabled, false);
+    assert.equal(body.reason, "no_portal_cookie");
+  });
+
+  test("the name inside somebody else's cookie does not count", async () => {
+    // A substring test over the header would pass all three of these, and each
+    // one is a browser with no portal session at all.
+    for (const header of [
+      "other=dolluzcorp_token",                 // the name as a VALUE
+      "not_dolluzcorp_token=x",                 // a longer name containing it
+      "dolluzcorp_token_old=x",                 // ditto, the other way round
+    ]) {
+      const { body } = await configWith(header);
+      assert.equal(body.enabled, false, `"${header}" was read as a portal session`);
+      assert.equal(body.reason, "no_portal_cookie");
+    }
+  });
+
+  test("an empty value is a signed out browser", async () => {
+    // Express clearCookie expires it, so a signed out browser usually sends
+    // nothing at all, but an empty value is the same situation.
+    for (const header of ["dolluzcorp_token=", "dolluzcorp_token= ", "a=1; dolluzcorp_token=; b=2"]) {
+      const { body } = await configWith(header);
+      assert.equal(body.enabled, false, `"${header}" was read as a portal session`);
+    }
+  });
+
+  test("spacing and position do not matter", async () => {
+    for (const header of [
+      "dolluzcorp_token=abc",
+      " dolluzcorp_token=abc ",
+      "theme=dark;dolluzcorp_token=abc",
+      "theme=dark; dolluzcorp_token=abc; other=1",
+      "dolluzcorp_token=abc; dolluzcorp_token=def",
+    ]) {
+      const { body } = await configWith(header);
+      assert.equal(body.enabled, true, `"${header}" was not read as a portal session`);
+    }
+  });
+
+  test("the cookie value is never echoed back", async () => {
+    const secret = "this-value-must-not-come-back-" + Math.random().toString(36).slice(2);
+    const { body } = await configWith(`dolluzcorp_token=${secret}`);
+    assert.ok(!JSON.stringify(body).includes(secret),
+      "the portal cookie value came back in the response");
+  });
+
+  test("not configured beats no cookie, because that is the more useful answer", async () => {
+    const real = config.portal.clientId;
+    config.portal.clientId = "";
+    try {
+      const { body } = await configWith(PORTAL_COOKIE);
+      assert.deepEqual(body, { enabled: false, reason: "not_configured" });
+    } finally {
+      config.portal.clientId = real;
+    }
+  });
+
+  test("the gate does not touch the callback, which arrives from a redirect", async () => {
+    // Gating the return leg on a cookie would add a way for the handoff to fail
+    // halfway through, for no benefit: by then Inside D has already answered.
+    const emp = employee();
+    const out = await api("POST", "/api/auth/portal/callback", {
+      portal_code: "x", state: "I".repeat(24), redirect_uri: CALLBACK,
+    }, null, undefined);
+    assert.notEqual(out.status, 503, "the callback refused a request with no cookie");
+    assert.ok(emp.empId);
+  });
+
+  test("hasPortalCookie answers a boolean and nothing else", () => {
+    const { hasPortalCookie, PORTAL_COOKIE_NAME } = require("../src/lib/portal-cookie");
+    assert.equal(PORTAL_COOKIE_NAME, "dolluzcorp_token");
+
+    // Nothing it is handed can make it throw or return a value.
+    for (const req of [undefined, null, {}, { headers: {} }, { headers: { cookie: null } },
+                       { headers: { cookie: "" } }, { headers: { cookie: ";;;" } },
+                       { headers: { cookie: "=" } }, { headers: { cookie: "novalue" } },
+                       { headers: { cookie: 42 } }]) {
+      assert.equal(hasPortalCookie(req), false, `${JSON.stringify(req)} was not false`);
+    }
+    assert.equal(hasPortalCookie({ headers: { cookie: "dolluzcorp_token=v" } }), true);
+    assert.equal(typeof hasPortalCookie({ headers: { cookie: "dolluzcorp_token=v" } }), "boolean");
   });
 });
 
@@ -250,17 +375,34 @@ describe("the portal token reaches dAI, and dAI never touches it", () => {
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/(^|[^:])\/\/.*$/gm, "$1 ");
 
-  test("nothing in server/src reads a cookie", () => {
-    const offenders = [];
+  test("exactly one file in server/src reads a cookie, and it is the small one", () => {
+    // It was none until the presence gate, and the invariant is now "one, and
+    // that one". A second file appearing here is the thing to look at: the
+    // portal token is one of the cookies on this origin, so a cookie read
+    // anywhere else is a read of a credential dAI must not hold.
+    const readers = [];
     for (const file of sourceFiles(SRC)) {
       const code = codeOf(file);
       if (/req\.cookies|cookieParser|cookie-parser|headers\.cookie|headers\[.cookie.\]|get\(\s*["']cookie["']\s*\)/i.test(code)) {
-        offenders.push(path.relative(SRC, file));
+        readers.push(path.relative(SRC, file).replace(/\\/g, "/"));
       }
     }
-    assert.deepEqual(offenders, [],
-      "these read a cookie, and the portal token is one of the cookies on this origin: "
-      + offenders.join(", "));
+    assert.deepEqual(readers, ["lib/portal-cookie.js"],
+      "a cookie is read somewhere it should not be: " + readers.join(", "));
+  });
+
+  test("and that file hands back a boolean, never a value", () => {
+    const code = codeOf(path.join(SRC, "lib", "portal-cookie.js"));
+    // It must not be able to return, log or store the value. The only thing it
+    // is allowed to learn from one is whether there is one.
+    assert.ok(!/console\.|logError|JSON\.stringify/.test(code),
+      "portal-cookie.js can write a cookie value somewhere");
+    assert.match(code, /\.length > 0;/, "it should measure the value, not read it");
+    assert.ok(!/return\s+pair\.slice\(eq \+ 1\)\s*;/.test(code),
+      "it returns the value itself");
+    // Small enough to read in full before trusting it.
+    assert.ok(code.split("\n").filter(l => l.trim()).length < 40,
+      "portal-cookie.js has grown; it is meant to stay readable in one sitting");
   });
 
   test("and there is no cookie parser to make it easy", () => {

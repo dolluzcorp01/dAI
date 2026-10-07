@@ -490,6 +490,47 @@ describe("the Dolluz portal is asked before a password is", () => {
     assert.equal(dom.el("card").hidden, false);
   });
 
+  test("a server that says no cookie, no handoff is obeyed without comment", async () => {
+    // /portal/config answers enabled:false when the browser carries no Dolluz
+    // portal cookie, so an AR caller never makes a trip that could only come
+    // back login_required. The page must treat that exactly as "not configured":
+    // show the form, say nothing. Neither is a fault and neither is the person's
+    // business. docs/17-portal-sso.md.
+    const storage = fakeStorage();
+    const dom = fakeDom({
+      state: "G".repeat(24), redirectUri: CALLBACK, storage,
+      fetchImpl: portalFetch({ config: { enabled: false, reason: "no_portal_cookie" } }),
+    });
+    await dom.settle();
+
+    assert.equal(dom.navigations.length, 0, "it went to the portal anyway");
+    assert.equal(dom.el("card").hidden, false);
+    assert.equal(dom.el("checking").hidden, true);
+    assert.equal(dom.el("portal-note").hidden, true, "it explained something that did not happen");
+    assert.equal(dom.el("error").hidden, true);
+    assert.deepEqual(storage.writes, [], "it kept state for a trip it did not make");
+  });
+
+  test("enabled:false is obeyed on its own, even with somewhere to go attached", async () => {
+    // The previous test passed enabled:false with no authorizeUrl, so it could
+    // not tell "the page obeys enabled" from "the page needs a URL". Dropping
+    // the enabled check from the page survived it. This is the version that
+    // fails: everything the page needs for the trip is present, and the only
+    // thing saying no is the flag.
+    const storage = fakeStorage();
+    const dom = fakeDom({
+      state: "J".repeat(24), redirectUri: CALLBACK, storage,
+      fetchImpl: portalFetch({
+        config: { ...PORTAL_CONFIG, enabled: false, reason: "no_portal_cookie" },
+      }),
+    });
+    await dom.settle();
+
+    assert.equal(dom.navigations.length, 0, "it went to the portal after being told not to");
+    assert.equal(dom.el("card").hidden, false);
+    assert.deepEqual(storage.writes, []);
+  });
+
   test("a portal that cannot be asked at all leaves the form exactly as it was", async () => {
     const storage = fakeStorage();
     const dom = fakeDom({

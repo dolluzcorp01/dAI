@@ -293,6 +293,16 @@ by a real person. PENDING = not started. Update this table at the end of every s
   app_dAI is turned off between signing in on the page and the extension redeeming the code
   gets a session that dies at the first refresh. Narrow, but it is the only gap left in the
   sign-in path. Phase 4: re-check in exchangeCode, or bind the check into the code row.
+- UNVERIFIED, and it decides whether portal single sign-on works at all on the surface
+  that matters: whether the window chrome.identity.launchWebAuthFlow opens carries the
+  profile's .dolluzcorp.com cookies. dAI now skips the trip to the portal when no portal
+  cookie is on the request, which saves an AR caller a redirect on every sign in, but if
+  that window has its own cookie jar then the answer is always "no cookie" and single
+  sign-on never triggers through the extension. The failure is safe and silent: everybody
+  gets the password form, which is today's behaviour. One line of the done-check when the
+  interim endpoint exists: sign in to the portal, open Kody from the extension, and look at
+  what /api/auth/portal/config answered. The flow=tab fallback is an ordinary tab and does
+  carry the cookie. Cannot be tested from this repository.
 - Single sign-on from Inside D is BUILT on dAI's side and INERT: with the five PORTAL_*
   values unset, the sign in page never leaves dai.dolluzcorp.com and the password form is
   the only way in. The Inside D half is a separate repository and has not been built. The

@@ -45,9 +45,29 @@ const enabled = () => config.portalEnabled();
 /**
  * What the sign in page needs to send somebody to Inside D. A client id is
  * public by definition. The secret is not here and never leaves the server.
+ *
+ * Two ways to answer "no, show the password form":
+ *
+ *   not_configured    the five PORTAL_* values are not all set, so there is
+ *                     nowhere to send anybody. This is how the repository ships.
+ *   no_portal_cookie  this browser is carrying no Dolluz portal cookie, so a
+ *                     trip to Inside D could only come back login_required.
+ *                     An AR caller who never opens the portal is in this state
+ *                     every time, and used to pay a redirect for it.
+ *
+ * `reason` is for whoever curls this endpoint and wonders why. The page does not
+ * read it: for the page, enabled:false means one thing, which is ask for a
+ * password, and it says nothing to the person in either case because neither is
+ * a fault.
+ *
+ * portalCookiePresent defaults to TRUE, deliberately. A caller that forgets to
+ * pass it gets the old behaviour, which is to ask Inside D and find out. The
+ * gate is an optimisation, so the safe default is the one that costs a redirect
+ * rather than the one that silently switches single sign-on off.
  */
-function pageConfig() {
-  if (!enabled()) return { enabled: false };
+function pageConfig({ portalCookiePresent = true } = {}) {
+  if (!enabled()) return { enabled: false, reason: "not_configured" };
+  if (!portalCookiePresent) return { enabled: false, reason: "no_portal_cookie" };
   return {
     enabled: true,
     authorizeUrl: config.portal.authorizeUrl,

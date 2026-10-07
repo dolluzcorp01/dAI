@@ -106,14 +106,47 @@ forward it, not to log it. At the time of writing nothing in `server/src` reads
 a cookie at all, and there is no cookie parser in `server/package.json`. That is
 deliberate and should stay true.
 
-Its **presence** is a different thing from its value, and is the one safe use:
-`/api/auth/portal/config` could answer `enabled: false` when the request carries
-no `dolluzcorp_token` at all, so somebody who has never opened the portal is
-never sent on a round trip that can only come back `login_required`. Presence is
-a hint and not proof, since the cookie may be expired or revoked for that app,
-so the worst case of trusting it is one wasted hop, which is also what the
-current behaviour costs everybody. NOT BUILT: the page currently always makes the
-trip when the portal is configured.
+Its **presence** is a different thing from its value, and is the one safe use.
+**Built.** `GET /api/auth/portal/config` answers `enabled: false` with
+`reason: "no_portal_cookie"` when the request carries no `dolluzcorp_token`, so
+somebody who has never opened the portal is never sent on a round trip that could
+only come back `login_required`. An AR caller is in that state every time.
+
+The read lives in `server/src/lib/portal-cookie.js`, which is the only file under
+`server/src` that touches a cookie, is deliberately small enough to read in full,
+and compares cookie **names** plus the **length** of one value. It never captures
+a value, returns one or logs one. Three tests hold that down: one asserts the
+list of files reading a cookie is exactly `["lib/portal-cookie.js"]`, one asserts
+that file cannot write a value anywhere, and one asserts it stays under forty
+lines.
+
+Names are compared whole, because a substring test over the header is a real bug
+rather than a theoretical one: `other=dolluzcorp_token` and
+`not_dolluzcorp_token=x` both contain the name and neither is a portal session.
+That mutation was run and caught.
+
+Presence is a **hint, not proof**. The cookie may be expired, or revoked for one
+app: Inside D deliberately does not clear it on a per-app revoke, so that
+revoking one app does not sign somebody out of all of them. A true answer means
+"worth asking", never "this person is signed in". Nothing is authorised on the
+strength of it, and the cost of a wrong yes is the one redirect that used to
+happen to everybody. So the default in `pageConfig()` is `true`: a caller that
+forgets to pass it gets the old behaviour, which costs a redirect, rather than
+silently switching single sign-on off.
+
+> **Unverified, and it has to be checked in a real Chrome before anyone relies
+> on single sign-on.** Whether the window that
+> `chrome.identity.launchWebAuthFlow` opens carries the profile's
+> `.dolluzcorp.com` cookies is not something this repository can test, and it is
+> the surface that matters: the extension is the product. If that window has its
+> own cookie jar, the gate answers "no portal cookie" every time and single
+> sign-on never triggers through the extension at all.
+>
+> The failure is safe but silent: everybody gets the password form, which is
+> exactly today's behaviour, so nothing breaks and nothing says why. The check is
+> one line of the done-check: sign in to the portal, then open Kody from the
+> extension, and look at whether `/portal/config` answered `enabled: true`. The
+> `flow=tab` fallback is an ordinary tab and does carry the cookie.
 
 ---
 

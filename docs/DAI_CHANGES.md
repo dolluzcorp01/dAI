@@ -526,3 +526,24 @@ Not built, on purpose: nothing propagates a portal logout to a Kody session. The
 answer was to make a portal sign-in last a working day instead of 30 days and SAY so, on the
 handoff screen and again when it ends, rather than let somebody find out by being signed out
 in the evening and assume Kody is broken.
+
+### Follow-up, 2026-10-07: no portal cookie, no round trip
+
+| File | Change | Why |
+|---|---|---|
+| server/src/lib/portal-cookie.js | NEW | The only file under server/src that reads a cookie. Compares cookie NAMES and the LENGTH of one value; never captures, returns or logs a value. Small on purpose so it can be read in full before being trusted, and a test fails if it grows past forty lines. |
+| server/src/services/portal.service.js | pageConfig({ portalCookiePresent }) | enabled:false now carries a reason, not_configured or no_portal_cookie, for whoever curls it. The page reads neither: for the page, enabled:false means ask for a password, and neither case is the person's business because neither is a fault. Defaults to true, so forgetting to pass it costs a redirect rather than silently disabling single sign-on. |
+| server/src/routes/auth.routes.js | the gate | GET /portal/config consults hasPortalCookie. POST /portal/callback deliberately does NOT: by then Inside D has already answered, and gating the return leg would add a way to fail halfway through for no benefit. |
+
+An AR caller never opens the portal, so prompt=none could only ever come back
+login_required for them: one wasted redirect on every sign in for somebody who will never
+benefit. The cookie is on .dolluzcorp.com so it reaches this server even though the page's
+JavaScript cannot see it, and noticing it is ABSENT is enough.
+
+Six mutations, six caught: the route not asking, the gate ignored, the cookie name matched
+as a substring of the header (other=dolluzcorp_token is not a portal session), an empty
+value counted as a session, the helper returning the value instead of a boolean, and the
+page making the trip after being told not to. The last one SURVIVED the first run, because
+the test that was meant to catch it sent enabled:false with no authorizeUrl and so could
+not tell "the page obeys enabled" from "the page needs a URL". A second test sends the
+whole configuration with enabled:false and catches it.

@@ -4,6 +4,7 @@ const config = require("../config");
 const svc = require("../services/auth.service");
 const { authenticate, rateLimit } = require("../middleware/auth");
 const { logError } = require("../lib/safe-error");   // dAI: never log an error object (PHI in err.sql)
+const { hasPortalCookie } = require("../lib/portal-cookie");   // dAI: yes or no, never the value
 
 const router = express.Router();
 
@@ -99,10 +100,15 @@ router.post("/logout", async (req, res) => {
 
 /* GET /api/auth/portal/config
    Where to send somebody, and nothing secret. No authentication, because the
-   answer is the same for everybody and the sign in page has nobody signed in
-   yet by definition. */
+   sign in page has nobody signed in yet by definition.
+
+   The answer is NOT the same for everybody: a browser carrying no Dolluz portal
+   cookie is told the handoff is off, so it never makes a round trip that could
+   only come back login_required. hasPortalCookie reads cookie NAMES and the
+   length of one value, and is the only thing in dAI that looks at the portal
+   cookie at all (server/src/lib/portal-cookie.js). */
 router.get("/portal/config", (req, res) => {
-  res.json(svc.portal.pageConfig());
+  res.json(svc.portal.pageConfig({ portalCookiePresent: hasPortalCookie(req) }));
 });
 
 /* POST /api/auth/portal/callback
