@@ -22,6 +22,8 @@
 const { test, before, after, describe } = require("node:test");
 const assert = require("node:assert");
 const http = require("node:http");
+const fs = require("node:fs");
+const path = require("node:path");
 const bcrypt = require("bcryptjs");
 
 process.env.AUTH_RATE_LOGIN_MAX = "10000";
@@ -220,6 +222,63 @@ describe("what the sign in page is told", () => {
     } finally {
       config.portal.clientId = real;
     }
+  });
+});
+
+describe("the portal token reaches dAI, and dAI never touches it", () => {
+  /**
+   * Inside D sets dolluzcorp_token on .dolluzcorp.com with SameSite=None in
+   * production (dApps/dolluzcorp, Login_server.js cookieOptions), so the browser
+   * sends it to dai.dolluzcorp.com on every request. HttpOnly keeps it from the
+   * page's JavaScript but not from this server.
+   *
+   * Which means the one credential this whole design exists to avoid holding is
+   * already sitting in dAI's request headers. The protection is not that it
+   * cannot arrive, because it does: it is that nothing here reads it. That is a
+   * thing somebody can undo by accident while adding a feature, so it is a test
+   * rather than a paragraph.
+   */
+  const SRC = path.join(__dirname, "..", "src");
+
+  /** Every .js under src, with comments stripped: this is about code. */
+  const sourceFiles = (dir) => fs.readdirSync(dir, { withFileTypes: true })
+    .flatMap(e => (e.isDirectory()
+      ? sourceFiles(path.join(dir, e.name))
+      : (e.name.endsWith(".js") ? [path.join(dir, e.name)] : [])));
+
+  const codeOf = (file) => fs.readFileSync(file, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1 ");
+
+  test("nothing in server/src reads a cookie", () => {
+    const offenders = [];
+    for (const file of sourceFiles(SRC)) {
+      const code = codeOf(file);
+      if (/req\.cookies|cookieParser|cookie-parser|headers\.cookie|headers\[.cookie.\]|get\(\s*["']cookie["']\s*\)/i.test(code)) {
+        offenders.push(path.relative(SRC, file));
+      }
+    }
+    assert.deepEqual(offenders, [],
+      "these read a cookie, and the portal token is one of the cookies on this origin: "
+      + offenders.join(", "));
+  });
+
+  test("and there is no cookie parser to make it easy", () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    assert.ok(!Object.keys(deps).some(d => /cookie/i.test(d)),
+      "a cookie parser was added, which puts dolluzcorp_token one property access away");
+  });
+
+  test("the exchange body is built from configuration, never from the request", () => {
+    // The route hands portal.exchange a code and nothing else, and the service
+    // fills in client_id and client_secret from config. A request cannot steer
+    // where the exchange goes or what it claims to be.
+    const svcSrc = codeOf(path.join(SRC, "services", "portal.service.js"));
+    assert.ok(!/\breq\b/.test(svcSrc),
+      "portal.service.js touches a request object; it should only ever see a code string");
+    assert.match(svcSrc, /client_secret: config\.portal\.clientSecret/);
+    assert.match(svcSrc, /config\.portal\.tokenUrl/);
   });
 });
 

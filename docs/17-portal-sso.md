@@ -13,6 +13,35 @@ Nothing in this document has been run end to end, because the Inside D half does
 not exist yet. dAI's half runs against a fake Inside D in
 `server/tests/portal-sso.test.js`.
 
+> **Interim, decided 2026-10-07.** The handoff below is the long-term design and
+> dAI's half of it is built. It is **not what will be switched on first.**
+> dAdmin is going to expose one small endpoint instead, and dAI will call that.
+>
+> Why: dAdmin already holds the shared `JWT_SECRET` that signs
+> `dolluzcorp_token`, so it can already verify a portal session, and it already
+> has a dedicated shared secret with dAI (`DADMIN_SHARED_JWT_SECRET`, Phase 1.2).
+> One endpoint in a repository that already holds the secret and already has a
+> trusted channel to dAI beats two endpoints, a new client registration and a new
+> secret in a repository that has none of those. The trust boundary does not move:
+> anything able to verify that cookie could already mint a session in any dApp,
+> and dAdmin is already in that position whether this is built or not.
+>
+> What carries over unchanged, whichever side answers: the response is an
+> `emp_id` and nothing else (section 5.2); dAI decides `app_dAI` itself
+> (section 4); the call has a timeout and any failure falls through to the
+> password form (section 3); the shorter session and the two places it is said
+> out loud (section 4, "When the portal session ends").
+>
+> What is parked: sections 5.1, 5.3 and 5.4, the browser-facing half. The
+> interim's own contract belongs with the dAdmin work and is not written here,
+> because inventing it from this side is how two repositories end up disagreeing
+> about it in production.
+>
+> This document stays the long-term design because the interim has one property
+> worth replacing later: it puts Kody sign-in behind the **admin console's**
+> uptime and deploy cadence, for people who never open the admin console. The
+> fallback makes that survivable, not free.
+
 ---
 
 ## 1. The shape, and the one that was rejected
@@ -50,11 +79,41 @@ It is also the same handoff shape dAI already uses for the Chrome extension
 
 ### Why a redirect and not a fetch
 
-Reading the portal session from dAI's page with `fetch` would be a cross-origin
-request with credentials, which needs `dolluzcorp_token` to be
-`SameSite=None`: a weaker cookie for every dApp in the suite, so that Kody could
-save one hop. A top-level GET carries a `SameSite=Lax` cookie as it is, and
-changes nothing on the portal's side.
+A cross-origin `fetch` with credentials would need CORS on Inside D: an exact
+allowed origin plus `Access-Control-Allow-Credentials`, which is a second
+browser-facing surface to get right. A top-level GET needs neither, and it is
+the same redirect the extension handoff already uses.
+
+**Corrected 2026-10-07.** This section previously also said that a credentialed
+fetch would require weakening `dolluzcorp_token` to `SameSite=None`. That is
+wrong: Inside D already sets it `SameSite=None; Secure; HttpOnly` on
+`.dolluzcorp.com` in production (`dApps/dolluzcorp`,
+`src/backend_routes/Login_server.js`, `cookieOptions`). Nothing would have had to
+be weakened. The security argument against introspection in section 1 stands on
+its own and does not depend on that claim; the claim was simply not checked
+before it was written down.
+
+### The portal cookie reaches dAI whether dAI wants it or not
+
+Following from the above, and worth writing down because it is a trap rather
+than a feature: because `dolluzcorp_token` is scoped to `.dolluzcorp.com` with
+`SameSite=None`, **it is sent to `dai.dolluzcorp.com` on every request**, and
+`HttpOnly` keeps it from the page's JavaScript but not from dAI's server.
+
+So the thing this whole design exists to avoid holding is already sitting in
+dAI's request headers. dAI must never read its value: not to verify it, not to
+forward it, not to log it. At the time of writing nothing in `server/src` reads
+a cookie at all, and there is no cookie parser in `server/package.json`. That is
+deliberate and should stay true.
+
+Its **presence** is a different thing from its value, and is the one safe use:
+`/api/auth/portal/config` could answer `enabled: false` when the request carries
+no `dolluzcorp_token` at all, so somebody who has never opened the portal is
+never sent on a round trip that can only come back `login_required`. Presence is
+a hint and not proof, since the cookie may be expired or revoked for that app,
+so the worst case of trusting it is one wasted hop, which is also what the
+current behaviour costs everybody. NOT BUILT: the page currently always makes the
+trip when the portal is configured.
 
 ---
 
@@ -134,8 +193,25 @@ It is the way in when:
 - the page is in a private window and has nowhere to keep its state
 - `crypto.getRandomValues` is unavailable, so there is no safe state to generate
 
-**Inside D being unavailable must never block signing in to Kody.** Otherwise
-dAI inherits the portal's uptime, having gained nothing.
+**Whoever answers the handoff, being unavailable must never block signing in to
+Kody.** Otherwise dAI inherits that service's uptime, having gained nothing.
+
+That is a property of code and not a promise, in one specific way: a box that is
+mid-deploy can accept a TCP connection and then never answer, which is a hang
+rather than a refusal. `portal.service.js` aborts the exchange after 5 seconds
+(`TIMEOUT_MS`) and reports `portal_unreachable`, which is a different error from
+`portal_refused` and gets different words, so nobody is left reading "your
+password was wrong" when the real answer is "nobody answered".
+
+What a Kody session does NOT depend on is the handoff. Kody's access and refresh
+tokens are issued and verified by Kody alone. Refresh re-reads
+`dadmin.employee` over the **shared MySQL connection** to enforce `app_dAI`
+revocation within one access token lifetime (Phase 1.1,
+`dadmin.service.accessRevoked`); it makes no HTTP call to dAdmin or to Inside D
+and must never start making one. Restarting or deploying either app signs nobody
+out. "Refresh must not call dAdmin" is already true, and must not be mistaken for
+"stop re-checking dadmin": the database read is what makes a revoked account lose
+access in 15 minutes rather than 30 days.
 
 Every one of those paths lands on the form with one quiet line above it saying
 why a password is being asked for. It is deliberately not the red error box:
