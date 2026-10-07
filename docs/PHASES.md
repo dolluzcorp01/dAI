@@ -305,6 +305,13 @@ by a real person. PENDING = not started. Update this table at the end of every s
   host_permissions explicitly. Narrowing that content script match, which the Web Store
   listing in Phase 3 is a realistic reason to do, would otherwise take single sign-on with
   it silently.
+- The INTERIM single sign-on, dAdmin's handoff, is BUILT on dAI's side and INERT until
+  DAI_LOGIN_JWT_SECRET and DAI_LOGIN_HANDOFF_URL are both set (docs/17-portal-sso.md
+  section 7). The caller is the extension service worker only: no window opens, no CORS is
+  needed on dAdmin, and nothing about it can block a sign in. dAdmin's half is not built
+  yet. NOT verified in a real Chrome: the whole path has only been exercised against a
+  stand-in dAdmin on this laptop, so the first real sign-in through the extension is the
+  done-check.
 - Single sign-on from Inside D is BUILT on dAI's side and INERT: with the five PORTAL_*
   values unset, the sign in page never leaves dai.dolluzcorp.com and the password form is
   the only way in. The Inside D half is a separate repository and has not been built. The

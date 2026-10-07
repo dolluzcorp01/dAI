@@ -263,3 +263,58 @@ describe("single sign-on from Inside D (docs/17-portal-sso.md)", () => {
     assert.match(r.out, /not on PUBLIC_URL/);
   });
 });
+
+describe("the dAdmin handoff (docs/17-portal-sso.md section 7)", () => {
+  const HANDOFF = {
+    DAI_LOGIN_JWT_SECRET: "E".repeat(44),
+    DAI_LOGIN_HANDOFF_URL: "https://dadmin.dolluzcorp.com/api/login/dai/handoff",
+  };
+
+  test("off is reported as off, not as a fault", () => {
+    const r = check();
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /dAdmin sign-in handoff is off/);
+  });
+
+  test("both set passes", () => {
+    const r = check(HANDOFF);
+    assert.equal(r.code, 0, r.out);
+  });
+
+  test("one of two is caught before pm2 restarts into a crash loop", () => {
+    for (const missing of Object.keys(HANDOFF)) {
+      const r = check({ ...HANDOFF, [missing]: null });
+      assert.equal(r.code, 1, `${missing} missing passed: ${r.out}`);
+      assert.match(r.out, /half configured/);
+      assert.match(r.out, new RegExp(missing));
+    }
+  });
+
+  test("the secret may not be a signing secret, or the portal client secret", () => {
+    for (const other of ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "DADMIN_SHARED_JWT_SECRET"]) {
+      const r = check({ ...HANDOFF, DAI_LOGIN_JWT_SECRET: GOOD[other] });
+      assert.equal(r.code, 1, `${other} reused passed: ${r.out}`);
+      assert.match(r.out, new RegExp(`same string as ${other}`));
+    }
+    const portal = "F".repeat(44);
+    const r = check({ ...HANDOFF, PORTAL_CLIENT_SECRET: portal, DAI_LOGIN_JWT_SECRET: portal });
+    assert.equal(r.code, 1);
+    assert.match(r.out, /same string as PORTAL_CLIENT_SECRET/);
+  });
+
+  test("a short secret is caught", () => {
+    const r = check({ ...HANDOFF, DAI_LOGIN_JWT_SECRET: "too-short" });
+    assert.equal(r.code, 1);
+    assert.match(r.out, /openssl rand/);
+  });
+
+  test("a non-https or local handoff URL is caught in production", () => {
+    const http = check({ ...HANDOFF, DAI_LOGIN_HANDOFF_URL: "http://dadmin.dolluzcorp.com/x" });
+    assert.equal(http.code, 1);
+    assert.match(http.out, /non-https handoff URL/);
+
+    const local = check({ ...HANDOFF, DAI_LOGIN_HANDOFF_URL: "https://localhost/x" });
+    assert.equal(local.code, 1);
+    assert.match(local.out, /dAdmin is a different application/);
+  });
+});

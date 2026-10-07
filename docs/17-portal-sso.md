@@ -548,7 +548,10 @@ their 8 hours and expire normally; nothing has to be revoked.
 
 ## 7. The interim: dAdmin's handoff endpoint
 
-**Status: contract proposed, not confirmed, nothing built on either side.**
+**Status: contract agreed 2026-10-07. dAI's half is BUILT. dAdmin's half is not
+built yet.** All four of dAI's changes were accepted, and the caller is the
+extension service worker only. It is inert until `DAI_LOGIN_JWT_SECRET` and
+`DAI_LOGIN_HANDOFF_URL` are both set.
 
 dAdmin exposes one endpoint and dAI calls it. dAdmin's half of the contract came
 from the dAdmin session on 2026-10-07; this section records it, plus the four
@@ -662,16 +665,80 @@ password form and nothing saying why.
 - The handoff URL is configuration, not a constant:
   `DAI_LOGIN_HANDOFF_URL`. Not secret.
 
-### What dAI will build, once dAdmin confirms
+### What dAI built
 
 | | |
 |---|---|
-| `extension/manifest.json` | `https://dadmin.dolluzcorp.com/*` in `host_permissions` |
-| extension service worker | one `fetch` with `credentials: "include"`, before any window opens; 401 or 503 falls silently through to the existing sign in page, 403 says why |
-| migration 014 | the `jti` table, single use enforced by a unique key inside a transaction |
-| `server/src/services/` | verify the `dai-login` token, then the existing `resolveUser({ portalEmpId })`, so `accessProblem()` still decides and `app_dAI` is enforced on this path exactly as on the others |
-| config | `DAI_LOGIN_JWT_SECRET`, `DAI_LOGIN_HANDOFF_URL`, with the same boot guards the portal secret has: its own value, never a signing secret, never short |
+| `extension/manifest.json` | `https://dadmin.dolluzcorp.com/*` declared in `host_permissions` |
+| `extension/src/shared/dai-login.js` | the whole caller: ask dAI where to go, call dAdmin with credentials, post the token back. Five second abort, no body, no query string, `referrerPolicy: "no-referrer"` |
+| `extension/src/background/service-worker.js` | tries it BEFORE any window opens; every failure but one falls silently through to the sign in page |
+| `server/migrations/014_dai_login_jti.sql` | the replay guard. The INSERT is the check, so there is no window between looking and writing |
+| `server/src/services/dai-login.service.js` | verify, then spend the jti, then act. `audience: "dai-login"`, a `maxAge` bound independent of `exp`, five seconds of clock tolerance |
+| `server/src/routes/auth.routes.js` | `GET /api/auth/dai-login/config` and `POST /api/auth/dai-login` |
+| `server/src/services/auth.service.js` | `loginWithVouchedEmpId`, which is `resolveUser({ portalEmpId })` plus a session with `origin = 'portal'` |
+| `server/src/config.js` | `daiLogin`, `daiLoginEnabled()`, and the boot guards |
+| `server/scripts/retention.js` | sweeps spent jti rows after a week, measured from `expires_at` |
 
 The session that comes out is `origin = 'portal'` and so lasts
 `PORTAL_SESSION_HOURS`, and says so in both places, exactly as section 4
-describes. None of that changes.
+describes. None of that changed.
+
+#### No one-time code on this path, and why
+
+The other two paths mint a Kody `auth_code` because the answer travels through a
+browser redirect, where it can be seen. This one has no redirect: the service
+worker calls dAI directly over https and reads the tokens from the response, so a
+code would be a round trip that protects nothing. `POST /api/auth/dai-login`
+returns a session the way `POST /api/auth/login` does.
+
+#### Where a person sees any of this
+
+Nowhere, when it works. No window opens.
+
+The single exception is an account without Kody access. dAdmin answers 403, or
+dAI does a moment later if `app_dAI` was turned off between the two calls, and
+the worker reports *"Your Dolluz account does not have Kody access yet. Ask your
+administrator."* without opening the sign in page. That wording is the sign in
+page's own, deliberately: the server's message for the same condition names
+dAdmin, which is right for an administrator, but two surfaces telling one person
+the same thing two different ways is worse than either wording.
+
+Everything else is silent and lands on the password form: no portal session
+(401), dAdmin unreachable or mid-deploy (timeout), dAdmin missing its own secret
+(503), the handoff not configured, or a configured URL that is not https.
+
+### What was measured, and where
+
+Nothing below was run on the box. All of it on this laptop, against the dev
+server on `localhost:4014` and a stand-in dAdmin on port 4998 implementing
+section 5 of this document, with the REAL local `dadmin.employee` table.
+
+| | |
+|---|---|
+| a portal session | `ok=true  user=Pavithran V V  origin=portal  8h`, tokens stored, no window |
+| the same handoff token twice | `attempt 1: HTTP 200 (a session)`, `attempt 2: HTTP 401 handoff_used` |
+| `DZIND002`, whose `app_dAI` is 0 | dAdmin vouched for them, dAI answered `HTTP 403 dai_not_enabled` and created no user |
+| what dAI tells the extension | `{"enabled":true,"handoffUrl":"..."}` and nothing else |
+
+Twelve mutations run against this work, twelve caught, every file restored
+byte-identical: single use not enforced, a duplicate jti treated as success, a
+token with no jti accepted, the audience unchecked, the second age bound dropped,
+the session issued as a password session, the client sending no credentials, an
+account with no access sent to the password form, a plain http handoff URL
+accepted, the worker opening a window before trying silently, and the two on the
+test cleanup below.
+
+### One thing this found in the test harness
+
+`dai_login_jti` is keyed on the jti, because the unique key IS the single-use
+enforcement and a surrogate id would add nothing. The test cleanup hook sweeps
+"every table with an auto-increment id", read from the schema, so this one was
+never swept: sixty rows survived one run of the suite.
+
+The hook now also sweeps an explicit short list of tables by `created_at`. The
+first version of that did nothing at all, silently, because the hook's pool never
+set its session time zone: `NOW()` came back in the server's local zone while the
+rows the suite wrote carried UTC, so on an IST box the mark landed five and a half
+hours in the future and the DELETE matched nothing. A sweep that removes zero rows
+looks exactly like a sweep with nothing to remove. Both of those are now tests,
+and both mutations are caught.

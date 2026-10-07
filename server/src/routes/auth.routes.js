@@ -158,6 +158,58 @@ router.post("/portal/callback", loginLimiter, async (req, res) => {
   }
 });
 
+/* ---------------- the dAdmin handoff, the interim (docs/17-portal-sso.md section 7) -------
+ *
+ * Not the same thing as /portal/* above, and on its own switch. There, the sign
+ * in PAGE sends somebody to Inside D and back. Here, the extension's SERVICE
+ * WORKER calls dAdmin with the portal cookie and posts the answer straight to
+ * dAI, so no window opens at all and there is no redirect to protect with a
+ * one-time code.
+ *
+ * dAI's backend cannot make that call itself: the cookie belongs to the browser.
+ */
+
+/* GET /api/auth/dai-login/config
+   Where the worker should call, and nothing secret. The URL is configuration so
+   that moving dAdmin's endpoint does not need a new extension release. No cookie
+   gate here, unlike /portal/config: there is no redirect to save, and the worker
+   cannot see the cookie to report on it anyway. */
+router.get("/dai-login/config", (req, res) => {
+  res.json(svc.daiLogin.clientConfig());
+});
+
+/* POST /api/auth/dai-login
+   Body: { token }, the 60 second JWT dAdmin minted. Returns a Kody session.
+
+   Rate limited on the IP alone, because there is no email in this request to key
+   on. The token itself is single use, so the limit is about noise rather than
+   about guessing: a forged token cannot be brute forced through a signature. */
+router.post("/dai-login", rateLimit({
+  windowMs: 60000, max: config.auth.rateTokenMax, keyFn: (req) => req.ip,
+}), async (req, res) => {
+  try {
+    const { token } = req.body || {};
+
+    // verify, then spend the jti, then sign in. In that order: a token that
+    // cannot be verified must not consume anything, and a verified token must be
+    // spent before it is acted on.
+    const { empId } = await svc.daiLogin.redeem(token);
+
+    // And now the ordinary path. dadmin's accessProblem() decides whether this
+    // person may use Kody, exactly as it does for a password, so app_dAI is
+    // enforced here because it is enforced in one place for every route.
+    const out = await svc.loginWithVouchedEmpId(
+      { portalEmpId: empId, surface: "extension" }, ctxOf(req)
+    );
+    res.json({ ...out, sessionHours: config.portal.sessionHours });
+  } catch (err) {
+    if (err instanceof svc.daiLogin.DaiLoginError) {
+      return res.status(err.status).json({ error: err.code, message: err.message });
+    }
+    handle(res, err);
+  }
+});
+
 /* POST /api/auth/forgot-password
    dAI: the password belongs to dadmin.employee, so dAI never resets one
    (docs/PHASES.md 1.1). It points at Inside D rather than the dAdmin console,

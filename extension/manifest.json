@@ -67,7 +67,8 @@
   ],
 
   "host_permissions": [
-    "https://dai.dolluzcorp.com/*"
+    "https://dai.dolluzcorp.com/*",
+    "https://dadmin.dolluzcorp.com/*"
   ],
 
   "externally_connectable": {

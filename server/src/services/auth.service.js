@@ -5,6 +5,7 @@ const { hashPassword, verifyPassword, fakeVerify } = require("../lib/password");
 const T = require("../lib/tokens");
 const dadmin = require("./dadmin.service");   // dAI: the dAdmin link (docs/PHASES.md 1.1)
 const portal = require("./portal.service");   // dAI: the Inside D link (docs/17-portal-sso.md)
+const daiLogin = require("./dai-login.service");   // dAI: the dAdmin handoff (section 7)
 
 class AuthError extends Error {
   constructor(status, code, message) {
@@ -235,6 +236,27 @@ async function login({ email, password, surface = "web" }, ctx = {}) {
 }
 
 /**
+ * dAI: sign in from an emp_id another service has vouched for, with no one-time
+ * code in between (docs/17-portal-sso.md section 7).
+ *
+ * The code exists in the other paths because the answer travels through a
+ * browser redirect. The dAdmin handoff has no redirect: the extension's service
+ * worker calls this directly over https and reads the tokens from the response,
+ * so a code would be a round trip that protects nothing.
+ *
+ * resolveUser, so dadmin's accessProblem() still decides. origin "portal", so
+ * the session lasts PORTAL_SESSION_HOURS and says so.
+ */
+async function loginWithVouchedEmpId({ portalEmpId, surface = "extension" }, ctx = {}) {
+  const user = await resolveUser({ portalEmpId }, ctx);
+  const tokens = await issueSession(user.id, surface, ctx, { origin: "portal" });
+  return {
+    user: { id: user.id, email: user.email, fullName: user.fullName, empId: user.empId },
+    ...tokens,
+  };
+}
+
+/**
  * Extension handoff, step 1. The site authenticates the user and mints a
  * one-time code bound to the extension's state value and redirect URI.
  * No tokens are returned here, because this response travels through a
@@ -461,7 +483,7 @@ async function setPassword(userId, plain) {
 
 module.exports = {
   AuthError, audit, rolesFor, ORIGINS,
-  login, authorize, exchangeCode, refresh, logout,
+  login, authorize, exchangeCode, refresh, logout, loginWithVouchedEmpId,
   listSessions, revokeSession, setPassword, issueSession, authenticate, resolveUser,
-  portal,
+  portal, daiLogin,
 };

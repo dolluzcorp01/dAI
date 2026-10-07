@@ -91,3 +91,49 @@ describe("the traps it has already fallen into", () => {
     assert.match(hook, /WHERE id > \?/, "and only delete above that");
   });
 });
+
+describe("tables with no auto-increment id", () => {
+  /**
+   * The id-based sweep covers every table with an auto-increment column, read
+   * from the schema. dai_login_jti has none: it is keyed on the jti itself,
+   * because the unique key IS the single-use enforcement (migration 014). So it
+   * was never cleaned, and sixty rows survived one run of the suite.
+   *
+   * The time-based sweep that fixes it then did nothing at all, silently, for a
+   * reason worth a test of its own: this pool did not set its session time zone,
+   * so NOW() came back in the server's local zone while the rows the suite wrote
+   * carried UTC. On an IST box the mark landed five and a half hours in the
+   * future and the DELETE matched nothing. A sweep that removes zero rows looks
+   * exactly like a sweep with nothing to remove.
+   */
+  test("are swept by time, from an explicit list", () => {
+    assert.match(hook, /const TIME_KEYED = new Map\(/,
+      "there is no time-based sweep, so a table without an id is never cleaned");
+    assert.match(hook, /\["dai_login_jti", "created_at"\]/,
+      "dai_login_jti is not in the list, so it accumulates a row per sign in");
+    assert.match(code(hook), /DELETE FROM .+ WHERE .+ >= \?/,
+      "the time-based delete is missing");
+  });
+
+  test("and this pool speaks UTC, or the mark is hours out", () => {
+    // The whole of the bug above, in one line of configuration. src/db.js does
+    // the same thing to the application's pool and says why.
+    assert.match(code(hook), /SET time_zone = '\+00:00'/,
+      "without this, a time-based mark is compared against rows in another zone");
+    assert.match(code(hook), /pool\.on\("connection"/,
+      "it has to be per connection: a pool hands out more than one");
+  });
+
+  test("the mark crosses as a string, not a Date", () => {
+    // A DATETIME becomes a JS Date and back, through two conversions that only
+    // agree when everything about both zones is right.
+    assert.match(code(hook), /DATE_FORMAT\(NOW\(\), '%Y-%m-%d %H:%i:%s'\)/,
+      "NOW() should come back formatted, so nothing converts it");
+  });
+
+  test("a time-based sweep is still refused for anything on the NEVER list", () => {
+    assert.match(code(hook), /if \(NEVER\.has\(table\)\) continue;/,
+      "the time-based path skips the NEVER check, so it could empty a table the "
+      + "id-based path protects");
+  });
+});

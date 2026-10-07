@@ -175,6 +175,38 @@ if (portalSet.length === 0) {
   }
 }
 
+/* ---------------- the dAdmin handoff (docs/17-portal-sso.md section 7) ---------------- */
+
+const DAI_LOGIN_KEYS = ["DAI_LOGIN_JWT_SECRET", "DAI_LOGIN_HANDOFF_URL"];
+const daiLoginSet = DAI_LOGIN_KEYS.filter(present);
+
+if (daiLoginSet.length === 0) {
+  note("the dAdmin sign-in handoff is off, so Kody asks for a password. "
+    + "Set DAI_LOGIN_JWT_SECRET and DAI_LOGIN_HANDOFF_URL to turn it on.");
+} else if (daiLoginSet.length < DAI_LOGIN_KEYS.length) {
+  fail("DAI_LOGIN_*", `half configured: missing ${DAI_LOGIN_KEYS.filter(k => !present(k)).join(", ")}. `
+    + "The app will refuse to start. Set both, or neither.");
+} else {
+  const secret = env.DAI_LOGIN_JWT_SECRET;
+  if (secret.length < 32) {
+    fail("DAI_LOGIN_JWT_SECRET", `is ${secret.length} characters. Use: openssl rand -base64 48`);
+  }
+  for (const other of ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "DADMIN_SHARED_JWT_SECRET",
+                       "PORTAL_CLIENT_SECRET"]) {
+    if (env[other] && secret === env[other]) {
+      fail("DAI_LOGIN_JWT_SECRET", `is the same string as ${other}. A token signed with this `
+        + "one lives in a browser, so it must be its own value.");
+    }
+  }
+  if (isProd && !/^https:\/\//.test(env.DAI_LOGIN_HANDOFF_URL)) {
+    fail("DAI_LOGIN_HANDOFF_URL", `is ${env.DAI_LOGIN_HANDOFF_URL}. The app refuses a `
+      + "non-https handoff URL in production, and the extension refuses to call one.");
+  }
+  if (looksLocal(env.DAI_LOGIN_HANDOFF_URL) && isProd) {
+    fail("DAI_LOGIN_HANDOFF_URL", "points at this box. dAdmin is a different application.");
+  }
+}
+
 /* ---------------- the model gateway ---------------- */
 
 const primary = env.MODEL_PRIMARY_PROVIDER;

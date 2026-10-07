@@ -106,6 +106,26 @@ const config = {
     sessionHours: int("PORTAL_SESSION_HOURS", 8),
   },
 
+  // dAI: the dAdmin handoff, the INTERIM form of single sign-on
+  // (docs/17-portal-sso.md section 7).
+  //
+  // The extension's service worker calls dAdmin with the portal cookie, dAdmin
+  // answers with a 60 second JWT, and dAI verifies it with this secret. INERT
+  // unless both values are set, and it is a separate switch from PORTAL_*: the
+  // interim does not use the redirect legs in the sign in page, and turning one
+  // on does not turn the other on.
+  //
+  // secret is its own dedicated random value. NEVER a JWT secret and never the
+  // dAdmin shared secret: a guard below refuses to boot if it is one of those.
+  // Unlike that shared secret, a token signed with this one lives in a browser,
+  // which is why it is its own.
+  daiLogin: {
+    secret: optional("DAI_LOGIN_JWT_SECRET", ""),
+    // Where the extension should call. Configuration rather than a constant in
+    // the extension, so moving dAdmin's endpoint does not need a new release.
+    handoffUrl: optional("DAI_LOGIN_HANDOFF_URL", ""),
+  },
+
   // Extension ids allowed to receive the auth handoff (chromiumapp.org callback).
   // Comma separated. Never a wildcard. See docs/14-extension.md.
   extensionIds: optional("EXTENSION_IDS", "")
@@ -183,6 +203,11 @@ const config = {
     const p = this.portal;
     return !!(p.clientId && p.clientSecret && p.authorizeUrl && p.tokenUrl && p.redirectUri);
   },
+
+  /** dAI: is the dAdmin handoff wired up? Both values, or neither. */
+  daiLoginEnabled() {
+    return !!(this.daiLogin.secret && this.daiLogin.handoffUrl);
+  },
 };
 
 /*
@@ -193,31 +218,56 @@ const config = {
  * somebody wires portal sign-on up for the first time is a laptop, so saying it
  * only in production would say it to the wrong person.
  */
-if (config.portal.clientSecret) {
-  // The Inside D client secret is its own value or dAI does not start. If it
-  // were a signing secret, dAI could mint a session as any employee in any dApp
-  // in the suite, and a compromise of dAI would become a compromise of all of
-  // them. docs/17-portal-sso.md "The secret".
+for (const [key, secret, what] of [
+  ["PORTAL_CLIENT_SECRET", config.portal.clientSecret,
+   "It authenticates dAI to Inside D's token endpoint and signs nothing."],
+  ["DAI_LOGIN_JWT_SECRET", config.daiLogin.secret,
+   "It verifies dAdmin's 60 second sign-in handoff and nothing else."],
+]) {
+  if (!secret) continue;
+  // Each of these is its own value or dAI does not start. If one were a signing
+  // secret, dAI could mint a session as any employee in any dApp in the suite,
+  // and a compromise of dAI would become a compromise of all of them.
+  // docs/17-portal-sso.md "The secret".
   const forbidden = {
     JWT_ACCESS_SECRET: config.auth.accessSecret,
     JWT_REFRESH_SECRET: config.auth.refreshSecret,
     DADMIN_SHARED_JWT_SECRET: config.dadmin.sharedJwtSecret,
   };
   for (const [name, value] of Object.entries(forbidden)) {
-    if (value && config.portal.clientSecret === value) {
+    if (value && secret === value) {
       throw new Error(
-        `Refusing to start: PORTAL_CLIENT_SECRET is the same value as ${name}. `
-        + "It must be its own dedicated random value. It authenticates dAI to "
-        + "Inside D's token endpoint and signs nothing."
+        `Refusing to start: ${key} is the same value as ${name}. `
+        + `It must be its own dedicated random value. ${what}`
       );
     }
   }
-  if (config.portal.clientSecret.length < 32) {
+  if (secret.length < 32) {
     throw new Error(
-      "Refusing to start: PORTAL_CLIENT_SECRET is shorter than 32 characters. "
+      `Refusing to start: ${key} is shorter than 32 characters. `
       + "Generate one with: openssl rand -base64 48"
     );
   }
+}
+
+// And not each other, which is the pair the loop above cannot see.
+if (config.portal.clientSecret && config.daiLogin.secret
+    && config.portal.clientSecret === config.daiLogin.secret) {
+  throw new Error(
+    "Refusing to start: PORTAL_CLIENT_SECRET and DAI_LOGIN_JWT_SECRET are the same value. "
+    + "One is sent to Inside D and one verifies tokens from dAdmin; they are different "
+    + "trust relationships and must be different secrets."
+  );
+}
+
+// Half of the dAdmin handoff is worse than none: the extension would call a URL
+// whose answer cannot be verified, or hold a secret with nowhere to use it.
+if (!!config.daiLogin.secret !== !!config.daiLogin.handoffUrl) {
+  throw new Error(
+    "Refusing to start with the dAdmin handoff half configured. Set both "
+    + "DAI_LOGIN_JWT_SECRET and DAI_LOGIN_HANDOFF_URL, or neither to leave the sign in "
+    + "page as the only way in."
+  );
 }
 
 // Half a handoff is worse than none: the person is sent to Inside D and comes
@@ -304,10 +354,12 @@ if (config.env === "production") {
     );
   }
   // dAI: https for every portal URL. Only in production, because running
-  // against a local Inside D over http is a legitimate thing to do on a laptop.
+  // against a local Inside D or dAdmin over http is a legitimate thing to do on
+  // a laptop.
   for (const [key, value] of [["PORTAL_AUTHORIZE_URL", config.portal.authorizeUrl],
                               ["PORTAL_TOKEN_URL", config.portal.tokenUrl],
-                              ["PORTAL_REDIRECT_URI", config.portal.redirectUri]]) {
+                              ["PORTAL_REDIRECT_URI", config.portal.redirectUri],
+                              ["DAI_LOGIN_HANDOFF_URL", config.daiLogin.handoffUrl]]) {
     if (value && !/^https:\/\//.test(value)) {
       throw new Error(`Refusing to start in production with a non-https ${key}.`);
     }

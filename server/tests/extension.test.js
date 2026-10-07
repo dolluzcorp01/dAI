@@ -130,8 +130,19 @@ describe("the manifest", () => {
       assert.ok(!manifest.permissions.includes(dangerous),
         `${dangerous} should not be a required permission`);
     }
-    assert.deepEqual(manifest.host_permissions, ["https://dai.dolluzcorp.com/*"],
-      "only our own API, not every site");
+    // Exactly these two, and nothing resembling a wildcard. dadmin is here
+    // because the service worker calls its handoff endpoint for single sign-on
+    // (docs/17-portal-sso.md section 7); it is declared rather than inherited
+    // from the content script's https://*/* match, which Chrome would otherwise
+    // have supplied invisibly.
+    assert.deepEqual(manifest.host_permissions.slice().sort(), [
+      "https://dadmin.dolluzcorp.com/*",
+      "https://dai.dolluzcorp.com/*",
+    ], "only the two Dolluz hosts the extension actually calls");
+    for (const origin of manifest.host_permissions) {
+      assert.match(origin, /^https:\/\/[a-z0-9.-]+\.dolluzcorp\.com\/\*$/,
+        `${origin} is not a single named Dolluz host`);
+    }
     assert.ok(manifest.optional_permissions.includes("identity"),
       "identity is requested only when the person signs in");
   });
@@ -409,6 +420,74 @@ describe("where the extension talks to", () => {
     const gitignore = require("node:fs").readFileSync(path.join(EXT, "..", ".gitignore"), "utf8");
     assert.match(gitignore, /\*\.pem/);
     assert.match(gitignore, /\.secrets\//, "and the place it now lives");
+  });
+
+  test("single sign-on is tried before any window opens", () => {
+    // docs/17-portal-sso.md section 7. Somebody who already has the portal open
+    // should not see a window at all, so the silent attempt has to come before
+    // launchWebAuthFlow rather than after it failing.
+    const worker = readExt("src/background/service-worker.js");
+    const signIn = worker.slice(worker.indexOf("async function signIn("),
+      worker.indexOf("async function alreadySignedIn("));
+
+    const silent = signIn.indexOf("trySilentSignIn(");
+    const webAuth = signIn.indexOf("launchWebAuthFlow(");
+    const tab = signIn.indexOf("tabs.create(");
+
+    assert.ok(silent > 0, "the worker never tries single sign-on");
+    assert.ok(silent < webAuth, "it opens Chrome's sign in window before trying silently");
+    assert.ok(silent < tab, "it opens a tab before trying silently");
+  });
+
+  test("a silent failure falls through, except the one a password cannot fix", () => {
+    const worker = readExt("src/background/service-worker.js");
+    const signIn = worker.slice(worker.indexOf("async function signIn("),
+      worker.indexOf("async function alreadySignedIn("));
+
+    assert.match(signIn, /if \(silent\.ok\)[\s\S]*return silent;/,
+      "a successful silent sign in should be the answer");
+    assert.match(signIn, /if \(silent\.quiet === false\) return silent;/,
+      "a non-quiet failure must stop here: opening the page would be sending "
+      + "somebody to type a password that is refused for the same reason");
+
+    // Strict equality on purpose. `if (!silent.quiet)` would also stop on every
+    // failure that forgot to set the flag, which is every future one.
+    assert.ok(!/if \(!silent\.quiet\)/.test(signIn),
+      "a missing flag would be treated as a reason to stop and show an error");
+  });
+
+  test("the extension declares the hosts it actually calls", () => {
+    // The service worker calls dAdmin. That worked before it was declared,
+    // because the content script matches https://*/* and Chrome counts that as a
+    // required host permission, which is a dependency nobody reviewing the
+    // manifest would see. Narrowing that match for the Web Store listing would
+    // take single sign-on with it, silently.
+    assert.ok(manifest.host_permissions.includes("https://dadmin.dolluzcorp.com/*"),
+      "dadmin.dolluzcorp.com is called by the worker and must be declared");
+    assert.ok(manifest.host_permissions.includes("https://dai.dolluzcorp.com/*"));
+  });
+
+  test("nothing in the extension reads a cookie", () => {
+    // The portal cookie is HttpOnly and belongs to the browser. The silent sign
+    // in asks the browser to attach it to one request, with credentials, and
+    // never looks at it. Reading it anywhere would be holding the credential the
+    // whole design exists to avoid holding.
+    const offenders = [];
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) { walk(full); continue; }
+        if (!entry.name.endsWith(".js")) continue;
+        const code = fs.readFileSync(full, "utf8")
+          .replace(/\/\*[\s\S]*?\*\//g, " ")
+          .replace(/(^|[^:])\/\/.*$/gm, "$1 ");
+        if (/document\.cookie|chrome\.cookies|browser\.cookies/.test(code)) {
+          offenders.push(path.relative(EXT, full).replace(/\\/g, "/"));
+        }
+      }
+    };
+    walk(path.join(EXT, "src"));
+    assert.deepEqual(offenders, [], "these read a cookie: " + offenders.join(", "));
   });
 
   test("a session that exists beats a cancellation that arrives late", () => {

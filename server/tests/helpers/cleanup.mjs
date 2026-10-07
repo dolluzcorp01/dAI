@@ -68,10 +68,45 @@ const NEVER = new Set([
   "schema_migrations",   // removing these would make the database look unmigrated
 ]);
 
+/**
+ * Tables with no auto-increment id, swept by created_at instead.
+ *
+ * A LIST, unlike the id-based sweep above, and for a different reason than the
+ * one that comment argues against. There, listing tables would go stale. Here,
+ * the question is not "which tables need cleaning" but "which tables is a
+ * time-based delete SAFE on", and that is a judgement per table rather than
+ * something the schema can answer: a DELETE on created_at is blunter than one on
+ * an id, since DATETIME has one second granularity and a mark cannot separate
+ * two rows written in the same second.
+ *
+ * dai_login_jti is keyed on the jti itself (migration 014), because the unique
+ * key IS the single-use enforcement and a surrogate id would add nothing to it.
+ * Before this, it was simply never cleaned: sixty rows survived one run of the
+ * suite, which is how it was noticed.
+ *
+ * A table goes in here only if the rows it holds are disposable and nothing
+ * reads them after the suite: these exist to refuse a replay of a token whose
+ * life is sixty seconds.
+ */
+const TIME_KEYED = new Map([
+  ["dai_login_jti", "created_at"],
+]);
+
 let marks = null;
 let pool = null;
 
-const connect = () => mysql.createPool({ ...DB, connectionLimit: 2, timezone: "Z" });
+/**
+ * Every connection speaks UTC, exactly as src/db.js makes the application's pool
+ * speak UTC. Without this line NOW() here is the server's local zone while the
+ * rows the suite wrote carry UTC, and a time-based mark lands 5.5 hours in the
+ * future on an IST box: the sweep matches nothing and says nothing, which is
+ * what it did when this was first written.
+ */
+const connect = () => {
+  const pool = mysql.createPool({ ...DB, connectionLimit: 2, timezone: "Z" });
+  pool.on("connection", (conn) => { conn.query("SET time_zone = '+00:00'"); });
+  return pool;
+};
 
 /**
  * Every table with an auto-increment id, read from the schema rather than
@@ -106,7 +141,22 @@ async function takeMarks() {
     const out = new Map();
     for (const table of tables) {
       const [[row]] = await conn.query(`SELECT COALESCE(MAX(id), 0) AS hi FROM \`${table}\``);
-      out.set(table, Number(row.hi));
+      out.set(table, { by: "id", hi: Number(row.hi) });
+    }
+    // The time-keyed ones are marked from the DATABASE's clock, not this
+    // process's: the pool runs at +00:00 and a laptop an hour out would either
+    // delete rows that were there before or none of the ones it made.
+    for (const [table, column] of TIME_KEYED) {
+      if (NEVER.has(table)) continue;
+      try {
+        // As a STRING, not a DATETIME that becomes a JS Date and back: the
+        // value goes into the DELETE exactly as it came out, so no conversion
+        // can happen at either end. The session zone above is what makes it
+        // comparable with rows the application wrote; this is belt as well.
+        const [[row]] = await conn.query(
+          "SELECT DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s') AS now");
+        out.set(table, { by: column, at: row.now });
+      } catch (_) { /* table absent on an older schema: nothing to clean */ }
     }
     return out;
   } finally {
@@ -134,8 +184,13 @@ async function sweepBack() {
     // a lot of machinery for a test database. Everything above the marks goes
     // together, so nothing can be left pointing at a deleted parent.
     await conn.query("SET FOREIGN_KEY_CHECKS = 0");
-    for (const [table, hi] of marks) {
-      const [res] = await conn.query(`DELETE FROM \`${table}\` WHERE id > ?`, [hi]);
+    for (const [table, mark] of marks) {
+      const [res] = mark.by === "id"
+        ? await conn.query(`DELETE FROM \`${table}\` WHERE id > ?`, [mark.hi])
+        // >= the mark, not >. A row written in the same second as the mark is a
+        // row this run made: the mark is taken before any test starts.
+        : await conn.query(
+          `DELETE FROM \`${table}\` WHERE \`${mark.by}\` >= ?`, [mark.at]);
       if (res.affectedRows > 0) {
         removed += res.affectedRows;
         touched.push(`${table}:${res.affectedRows}`);

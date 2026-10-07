@@ -511,6 +511,69 @@ describe("production configuration guards", () => {
     assert.match(err || "", /openssl rand/, "and says how to generate one");
   });
 
+  /* dAI: the dAdmin handoff, the interim single sign-on (docs/17-portal-sso.md s7). */
+
+  const DAI_LOGIN = {
+    DAI_LOGIN_JWT_SECRET: "dai-login-secret-" + "w".repeat(30),
+    DAI_LOGIN_HANDOFF_URL: "https://dadmin.dolluzcorp.com/api/login/dai/handoff",
+  };
+
+  test("the dAdmin handoff: both set starts, neither set starts", () => {
+    assert.equal(checkProd({ ...goodEnough, ...DAI_LOGIN }), null,
+      "a configured handoff has to be able to start");
+    assert.equal(checkProd(goodEnough), null,
+      "and so does a box without one, which is how it ships");
+  });
+
+  test("the dAdmin handoff half configured is refused", () => {
+    for (const missing of Object.keys(DAI_LOGIN)) {
+      const err = checkProd({ ...goodEnough, ...DAI_LOGIN, [missing]: "" });
+      assert.match(err || "", /dAdmin handoff half configured/, `${missing} missing was accepted`);
+    }
+  });
+
+  test("the handoff secret may not be a signing secret, or the portal's", () => {
+    // A token signed with this one lives in a browser, which is exactly why it
+    // is not allowed to be the secret that signs server to server tokens.
+    const shared = "shared-with-dadmin-" + "v".repeat(30);
+    const cases = {
+      JWT_ACCESS_SECRET: goodEnough.JWT_ACCESS_SECRET,
+      JWT_REFRESH_SECRET: goodEnough.JWT_REFRESH_SECRET,
+      DADMIN_SHARED_JWT_SECRET: shared,
+    };
+    for (const [name, value] of Object.entries(cases)) {
+      const err = checkProd({
+        ...goodEnough, ...DAI_LOGIN,
+        DADMIN_SHARED_JWT_SECRET: shared,
+        DAI_LOGIN_JWT_SECRET: value,
+      });
+      assert.match(err || "", new RegExp(`DAI_LOGIN_JWT_SECRET is the same value as ${name}`),
+        `DAI_LOGIN_JWT_SECRET = ${name} was accepted`);
+    }
+
+    // And not the portal's, which the loop cannot see because neither is a
+    // signing secret: they are two different trust relationships.
+    const err = checkProd({
+      ...goodEnough, ...PORTAL, ...DAI_LOGIN,
+      DAI_LOGIN_JWT_SECRET: PORTAL.PORTAL_CLIENT_SECRET,
+    });
+    assert.match(err || "", /PORTAL_CLIENT_SECRET and DAI_LOGIN_JWT_SECRET are the same value/);
+  });
+
+  test("a short handoff secret is refused, with the command to make one", () => {
+    const err = checkProd({ ...goodEnough, ...DAI_LOGIN, DAI_LOGIN_JWT_SECRET: "short" });
+    assert.match(err || "", /DAI_LOGIN_JWT_SECRET is shorter/);
+    assert.match(err || "", /openssl rand/);
+  });
+
+  test("a non-https handoff URL is refused in production", () => {
+    const err = checkProd({
+      ...goodEnough, ...DAI_LOGIN,
+      DAI_LOGIN_HANDOFF_URL: "http://dadmin.dolluzcorp.com/api/login/dai/handoff",
+    });
+    assert.match(err || "", /non-https DAI_LOGIN_HANDOFF_URL/);
+  });
+
   test("the two guards that are not about production fire in development too", () => {
     // They were production-only at first, which says it to the wrong person:
     // the place somebody wires portal sign-on up for the first time is a laptop.

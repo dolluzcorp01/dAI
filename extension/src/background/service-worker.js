@@ -20,6 +20,10 @@ import {
 // of them happens here, so token refresh has exactly one home.
 import { kodyApi, resetApi } from "../shared/api.js";
 import { endpoints, setEndpoints, clearEndpoints, matchPattern } from "../shared/config.js";
+// dAI: single sign-on through dAdmin (docs/17-portal-sso.md section 7). Runs
+// before any window opens, and falls silently through to the page when it cannot.
+import { trySilentSignIn } from "../shared/dai-login.js";
+import { setTokens } from "../shared/auth.js";
 
 const SIDE_PANEL_PATH = "src/sidepanel/index.html";
 
@@ -76,6 +80,21 @@ async function signIn() {
         + "Open Server in the popup and click Use this server.",
     };
   }
+
+  // dAI: somebody who already has the Dolluz portal open should not type a
+  // password. dAdmin reads its own cookie and vouches for them, and this
+  // finishes without opening anything at all (docs/17-portal-sso.md section 7).
+  //
+  // Nothing about this path is allowed to stop a sign in. Every failure except
+  // one is quiet and falls through to the page below. The exception is an
+  // account with no Kody access: the password would be refused for the same
+  // reason, so opening the page would be sending somebody to fail twice.
+  const silent = await trySilentSignIn({ apiBase, setTokens });
+  if (silent.ok) {
+    await updateBadge();
+    return silent;
+  }
+  if (silent.quiet === false) return silent;
 
   const useWebAuthFlow = !!(chrome.identity && chrome.identity.launchWebAuthFlow);
   const { url } = await beginSignIn({

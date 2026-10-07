@@ -568,3 +568,40 @@ his laptop against production, because neither can be tested from this repositor
   grant and why permissions.remove refused to take it away. A statement in the previous
   reply that this would cost a permission prompt was wrong, and is corrected in section 7.
   It works and should not be left resting on that: the interim declares it.
+
+### The dAdmin handoff, 2026-10-07 (docs/17-portal-sso.md section 7)
+
+The interim single sign-on, built after dAdmin agreed all four of dAI's points. The caller
+is the extension's SERVICE WORKER, so no window opens, dAdmin needs no CORS, and the
+cookie-presence gate does not apply: there is no redirect to save.
+
+| File | Change | Why |
+|---|---|---|
+| server/migrations/014_dai_login_jti.sql | NEW | The replay guard dAdmin cannot provide. A table and not a Set in memory, because two pm2 instances each keep their own and a pm2 restart empties it, and neither failure logs anything. The INSERT is the check, so there is no window between looking and writing. |
+| server/src/services/dai-login.service.js | NEW | Verify, then spend the jti, then act. audience "dai-login" refuses a dai-admin token outright; maxAge bounds age from iat independently of exp; a token with no jti is refused rather than accepted without enforcement. |
+| server/src/services/auth.service.js | loginWithVouchedEmpId | resolveUser({ portalEmpId }) plus origin "portal". No one-time code: there is no redirect on this path, so a code would protect nothing. |
+| server/src/routes/auth.routes.js | two routes | GET /dai-login/config tells the extension where to call, which is configuration so moving dAdmin's endpoint needs no extension release. POST /dai-login returns a session. |
+| server/src/config.js | daiLogin, four guards | Inert unless both values are set. The secret may not be a signing secret, the portal's, or shorter than 32; the URL must be https in production. |
+| extension/manifest.json | host_permissions | https://dadmin.dolluzcorp.com/* declared, rather than inherited invisibly from the content script's https://*/* match. |
+| extension/src/shared/dai-login.js | NEW | The caller. Five second abort so a dAdmin mid-deploy cannot hang a sign in, no body, no query string, no referrer. Every failure quiet except an account with no Kody access, where a password would be refused for the same reason. |
+| extension/src/background/service-worker.js | `// dAI:` the silent attempt | Before any window opens, so somebody with the portal open sees nothing at all. |
+| server/scripts/retention.js | the jti sweep | A week, measured from expires_at and not created_at: deleting a row whose exp has not passed would make the token replayable again. |
+| server/tests/helpers/cleanup.mjs | time-keyed sweep, and UTC | See below. |
+
+The test harness had two faults this work uncovered, both silent:
+
+1. The cleanup hook sweeps "every table with an auto-increment id", read from the schema.
+   dai_login_jti is keyed on the jti itself, so it was never swept and sixty rows survived
+   one run. The hook now also sweeps an explicit short list of tables by created_at, and the
+   list is explicit because the question is not which tables need cleaning but which ones a
+   time-based delete is safe on.
+2. That time-based sweep then did nothing at all, because the hook's pool never set its
+   session time zone. NOW() came back in the server's local zone while the rows carried UTC,
+   so on an IST box the mark landed five and a half hours in the future and the DELETE
+   matched nothing. A sweep that removes zero rows looks exactly like a sweep with nothing to
+   remove. src/db.js had done this correctly for the application's pool all along.
+
+Twelve mutations, twelve caught. Measured on this laptop only, against a stand-in dAdmin and
+the real local dadmin.employee table: a portal session signs in with origin=portal and 8
+hours, a replayed token is refused with handoff_used, and DZIND002 with app_dAI = 0 is
+refused 403 even though dAdmin vouched for them. Nothing has run on the box.

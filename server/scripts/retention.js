@@ -78,11 +78,30 @@ const RULES = [
     where: "created_at < ?",
     label: "digest runs",
   },
+  {
+    // dAI: spent dAdmin sign-in handoff ids (docs/17-portal-sso.md section 7).
+    //
+    // A row exists to refuse a replay of one 60 second token. Keeping it past
+    // the token's own exp protects nothing, and a week is kept only so that
+    // "was this handoff replayed" can still be answered for a few days.
+    //
+    // The clause is expires_at, not created_at, and that is load-bearing:
+    // deleting a row whose exp has NOT passed would make the token replayable
+    // again. Measured from exp, a cutoff of MIN_DAYS puts it a week past dead.
+    key: "daiLoginJti",
+    table: "dai_login_jti",
+    window: "handoffIds",
+    where: "expires_at < ?",
+    label: "spent sign-in handoff ids",
+    // There is no user_id on this table, deliberately: a replay guard does not
+    // need to know whose replay it refused. So --user cannot scope it.
+    noUserScope: true,
+  },
 ];
 
 function parseArgs(argv) {
   const flags = {
-    notifications: 90, unread: 365, digests: 90,
+    notifications: 90, unread: 365, digests: 90, handoffIds: 7,
     apply: false, userIds: [], force: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -92,6 +111,7 @@ function parseArgs(argv) {
     else if (a === "--notifications") flags.notifications = Number(argv[++i]);
     else if (a === "--unread") flags.unread = Number(argv[++i]);
     else if (a === "--digests") flags.digests = Number(argv[++i]);
+    else if (a === "--handoff-ids") flags.handoffIds = Number(argv[++i]);
     else if (a === "--user") flags.userIds.push(Number(argv[++i]));
     else if (a === "--audit-log") {
       console.error("This script does not prune audit_log. An audit trail is what lets");
@@ -112,7 +132,9 @@ const cutoff = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 function clauseFor(rule, days, userIds) {
   const where = [rule.where];
   const params = [cutoff(days)];
-  if (userIds && userIds.length > 0) {
+  // A rule on a table with no user_id cannot be scoped to a person, and adding
+  // the clause anyway would be invalid SQL rather than a narrower sweep.
+  if (!rule.noUserScope && userIds && userIds.length > 0) {
     where.push(`user_id IN (${userIds.map(() => "?").join(",")})`);
     params.push(...userIds);
   }
@@ -123,6 +145,7 @@ const windowsFrom = (opts) => ({
   notifications: opts.notifications === undefined ? 90 : opts.notifications,
   unread: opts.unread === undefined ? 365 : opts.unread,
   digests: opts.digests === undefined ? 90 : opts.digests,
+  handoffIds: opts.handoffIds === undefined ? 7 : opts.handoffIds,
 });
 
 /**
