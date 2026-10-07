@@ -547,3 +547,24 @@ page making the trip after being told not to. The last one SURVIVED the first ru
 the test that was meant to catch it sent enabled:false with no authorizeUrl and so could
 not tell "the page obeys enabled" from "the page needs a URL". A second test sends the
 whole configuration with enabled:false and catches it.
+
+### Follow-up, 2026-10-07: the interim contract, and one measurement
+
+docs/17 section 7 records dAdmin's handoff endpoint, the four changes dAI asked for
+(403 not silent, a separate DAI_LOGIN_JWT_SECRET, jti single use as a MySQL row rather than
+an in-memory set, 503 landing on the password form silently), and what dAI will build once
+dAdmin confirms. Nothing is built on either side.
+
+Documentation only, no code. Two things were measured rather than assumed, both by Shoban on
+his laptop against production, because neither can be tested from this repository:
+
+- The window chrome.identity.launchWebAuthFlow opens DOES carry the profile's
+  .dolluzcorp.com cookies, and so does a service worker fetch with credentials included.
+  The interim takes the service worker route regardless: no window, no CORS on dAdmin's
+  side, and no redirect to gate.
+- The extension's host access to dadmin.dolluzcorp.com is NOT declared. host_permissions
+  lists only dai.dolluzcorp.com; the access comes from the content script's https://*/*
+  match, which Chrome counts as a required host permission, which is why probe B needed no
+  grant and why permissions.remove refused to take it away. A statement in the previous
+  reply that this would cost a permission prompt was wrong, and is corrected in section 7.
+  It works and should not be left resting on that: the interim declares it.

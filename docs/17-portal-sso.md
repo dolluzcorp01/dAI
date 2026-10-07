@@ -134,19 +134,21 @@ happen to everybody. So the default in `pageConfig()` is `true`: a caller that
 forgets to pass it gets the old behaviour, which costs a redirect, rather than
 silently switching single sign-on off.
 
-> **Unverified, and it has to be checked in a real Chrome before anyone relies
-> on single sign-on.** Whether the window that
-> `chrome.identity.launchWebAuthFlow` opens carries the profile's
-> `.dolluzcorp.com` cookies is not something this repository can test, and it is
-> the surface that matters: the extension is the product. If that window has its
-> own cookie jar, the gate answers "no portal cookie" every time and single
-> sign-on never triggers through the extension at all.
+> **Measured 2026-10-07**, by Shoban, on his laptop, in the Chrome profile he
+> uses for Kody, extension `ikamkodfpkklimdldhfpnhmmlapdjpmn` against
+> production. Both probes used Inside D's `/api/employee/me`, which is
+> `optionalAuth` and so answers `authenticated: true` or `false` rather than
+> 401: the difference is purely whether the cookie arrived.
 >
-> The failure is safe but silent: everybody gets the password form, which is
-> exactly today's behaviour, so nothing breaks and nothing says why. The check is
-> one line of the done-check: sign in to the portal, then open Kody from the
-> extension, and look at whether `/portal/config` answered `enabled: true`. The
-> `flow=tab` fallback is an ordinary tab and does carry the cookie.
+> | Probe | Result |
+> |---|---|
+> | normal tab (control) | `authenticated: true` |
+> | `chrome.identity.launchWebAuthFlow` on that URL | `authenticated: true`. That window DOES carry the profile's `.dolluzcorp.com` cookies. |
+> | `fetch` from the extension service worker, `credentials: "include"` | `authenticated: true` |
+>
+> So neither route is blocked. The interim takes the service worker route anyway
+> (section 7), which makes the first of those irrelevant rather than merely
+> survivable.
 
 ---
 
@@ -541,3 +543,135 @@ In order. Steps 1 to 3 are Inside D's, 4 and 5 are dAI's.
 Blank the five `PORTAL_*` lines and restart. The page stops leaving the origin
 and the password form is the only way in again. Sessions already issued keep
 their 8 hours and expire normally; nothing has to be revoked.
+
+---
+
+## 7. The interim: dAdmin's handoff endpoint
+
+**Status: contract proposed, not confirmed, nothing built on either side.**
+
+dAdmin exposes one endpoint and dAI calls it. dAdmin's half of the contract came
+from the dAdmin session on 2026-10-07; this section records it, plus the four
+changes dAI asked for and what dAI will do with it. Nothing here is agreed until
+dAdmin confirms, because changing it afterwards means changing both repositories.
+
+### What dAdmin offered
+
+```
+POST https://dadmin.dolluzcorp.com/api/login/dai/handoff
+  credentials: include        the portal cookie is what authenticates it
+  body: none, and no query string ever: the token must not reach a URL,
+        a log or a Referer header
+
+200 { "token": "<jwt>", "expiresInSeconds": 60 }
+    payload { emp_id, aud: "dai-login", jti, iat, exp }, exp = iat + 60
+401 { "error": "login_required" }      no cookie, invalid, expired, revoked
+403 { "error": "dai_not_enabled" }     app_dAI = 0, inactive, or deleted
+503 { "error": "dai_not_configured" }  the shared secret is missing on dAdmin
+```
+
+dAdmin checks, in order: the cookie is valid under `JWT_SECRET`; it is not a
+half-finished two-step challenge token; the session is not revoked in dAdmin's
+Login Page Config; and the employee row has `active = 1`,
+`deleted_time IS NULL`, `app_dAI = 1`. The handler does one JWT verify and one
+indexed SELECT, with no outbound calls.
+
+### Who makes the call, and why it is not dAI's server
+
+`credentials: include` means **the browser** authenticates this, so dAI's backend
+cannot make it: the backend has no cookie. That leaves two candidates, and the
+extension's **service worker** wins on every axis:
+
+| | service worker | the sign in page |
+|---|---|---|
+| A window opens | no. Sign-on is invisible. | yes, the existing page |
+| CORS on dAdmin | none needed | `Access-Control-Allow-Origin: https://dai.dolluzcorp.com` exactly, `Allow-Credentials: true`, and an `OPTIONS` handler |
+| Depends on `launchWebAuthFlow` carrying cookies | no | yes |
+| Cookie-presence gate (section "The portal cookie reaches dAI") | not needed: there is no redirect to save, and a 401 in 50ms is not worth gating | useful |
+
+So the interim does **not** use the `PORTAL_*` configuration, and does not turn
+on the redirect legs in `server/public/extension/authorize/`. Those stay inert,
+with `PORTAL_*` unset, and remain the long-term design. The interim gets its own
+configuration.
+
+#### The host permission is already granted, by accident rather than by intent
+
+A service worker `fetch` to another origin needs host permission, and
+`dadmin.dolluzcorp.com` is **not** in the extension's `host_permissions`, which
+lists only `https://dai.dolluzcorp.com/*`. It is covered by the content script's
+`https://*/*` match, which the bubble needs in order to appear on any page, and
+which Chrome counts as a required host permission. That is why probe B needed no
+grant, and why `permissions.remove` answered "You cannot remove required
+permissions".
+
+It works, and it should not be left resting on that. `https://dadmin.dolluzcorp.com/*`
+belongs in `host_permissions` explicitly, so the dependency is declared where
+somebody reviewing the manifest can see it. The Web Store listing in Phase 3 is a
+realistic reason to narrow a `https://*/*` content script match, and narrowing it
+would take single sign-on with it, silently, with everybody falling back to the
+password form and nothing saying why.
+
+### The four changes dAI asked for
+
+1. **403 is not silent.** dAdmin proposed treating 401 and 403 alike: show the
+   password form, no error. 401 yes. 403 no: it means `app_dAI = 0`, inactive or
+   deleted, and **the password will be refused for the same reason**, so a silent
+   password form sends that person to fail twice and then raise a ticket. dAI
+   already says *"Your Dolluz account does not have Kody access yet. Ask your
+   administrator."* and has a test for it. It leaks nothing, because the portal
+   has already authenticated them as themselves.
+
+2. **`dai-login` gets its own secret, `DAI_LOGIN_JWT_SECRET`.**
+   `DADMIN_SHARED_JWT_SECRET` currently signs only tokens that travel dAdmin to
+   dAI, server to server. This design has it signing a token that lives in a
+   browser. A leaked token does not leak the secret, so this is survivable rather
+   than broken, but one environment variable each side removes the question
+   instead of managing it. If dAdmin would rather keep one secret, the audience
+   split becomes load-bearing: dAI's admin middleware already passes
+   `audience: "dai-admin"` and an independent `maxAge` to `jwt.verify`
+   (`server/src/middleware/dadmin-service.js`), and dAI will add a test in both
+   directions, because strictness with no test aimed at it is how strictness
+   stops being strict.
+
+3. **`jti` single use is a MySQL row, not an in-memory set.** dAdmin left
+   enforcement to dAI and suggested memory or Redis. Memory is wrong twice over:
+   two pm2 instances each keep their own set, so a replay against the other
+   instance succeeds and nothing fails loudly; and a `pm2 restart` empties the
+   set, so a replay inside the remaining window succeeds. A row with a unique key,
+   consumed inside a transaction, is the mechanism `auth_codes` already proves.
+   Migration 014. A token with no `jti` is refused rather than accepted without
+   enforcement.
+
+4. **503 `dai_not_configured` lands on the password form silently**, not as
+   `portal_unreachable`. It is a configuration answer and not an outage: retrying
+   cannot help, and "the portal did not answer" is the wrong thing to tell
+   somebody about a state only dAdmin can fix. The 5xx rule is right for
+   everything else.
+
+### Smaller notes, needing nothing from dAdmin
+
+- `dai.dolluzcorp.com` to `dadmin.dolluzcorp.com` is **same-site** (eTLD+1 is
+  `dolluzcorp.com`), so SameSite and third-party cookie blocking do not apply to
+  the page route if it is ever used. Only CORS does.
+- The 5 second abort stays, as dAdmin asked. A box mid-deploy can accept a
+  connection and never answer, which is the case it guards.
+- Clock skew is nil, since both apps are on the same droplet. dAI will allow a
+  few seconds of tolerance anyway, and apply a `maxAge` bound independent of
+  `exp`, so a bug issuing a long-lived token still could not produce a key that
+  works for hours.
+- The handoff URL is configuration, not a constant:
+  `DAI_LOGIN_HANDOFF_URL`. Not secret.
+
+### What dAI will build, once dAdmin confirms
+
+| | |
+|---|---|
+| `extension/manifest.json` | `https://dadmin.dolluzcorp.com/*` in `host_permissions` |
+| extension service worker | one `fetch` with `credentials: "include"`, before any window opens; 401 or 503 falls silently through to the existing sign in page, 403 says why |
+| migration 014 | the `jti` table, single use enforced by a unique key inside a transaction |
+| `server/src/services/` | verify the `dai-login` token, then the existing `resolveUser({ portalEmpId })`, so `accessProblem()` still decides and `app_dAI` is enforced on this path exactly as on the others |
+| config | `DAI_LOGIN_JWT_SECRET`, `DAI_LOGIN_HANDOFF_URL`, with the same boot guards the portal secret has: its own value, never a signing secret, never short |
+
+The session that comes out is `origin = 'portal'` and so lasts
+`PORTAL_SESSION_HOURS`, and says so in both places, exactly as section 4
+describes. None of that changes.
